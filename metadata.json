@@ -1,0 +1,8 @@
+{
+  "name": "AI School Timetable Studio",
+  "description": "نظام ذكي متكامل لإنشاء وإدارة جداول الحصص المدرسية بمحرك الاستمثال الرياضي والذكاء الاصطناعي مع تصدير PDF و Excel",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

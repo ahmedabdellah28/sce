@@ -1,0 +1,345 @@
+{
+  "id": "preset_sec_gov_35",
+  "name": "المرحلة الثانوية العامة — حكومي عام (فترة واحدة - 35 حصة)",
+  "label": "ثانوي عام حكومي (35 حصة)",
+  "school_type": "GOVERNMENT_GENERAL",
+  "stage": "SECONDARY",
+  "shift_system": "SINGLE_SHIFT",
+  "description": "قيم شائعة قابلة للتعديل للمرحلة الثانوية: 7 حصص يومياً (35 حصة)، تشمل اللغتين الأولى والثانية والرياضيات والعلوم المتكاملة.",
+  "days": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "shifts": [
+    {
+      "name": "فترة الثانوي العام",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "periods_by_day": {
+        "0": 7,
+        "1": 7,
+        "2": 7,
+        "3": 7,
+        "4": 7
+      },
+      "weekly_capacity": 35
+    }
+  ],
+  "grades": [
+    {
+      "grade_number": 1,
+      "name": "الصف الأول الثانوي",
+      "code": "S1",
+      "shift_name": "فترة الثانوي العام",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 7,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الأجنبية الأولى (الإنجليزية)",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "English"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "category": "LANG"
+        },
+        {
+          "id": "second_lang",
+          "name": "اللغة الأجنبية الثانية (فرنسي/ألماني/إيطالي)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "إيطالي",
+            "لغة ثانية"
+          ],
+          "periods": 4,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات البحتة والتطبيقية",
+          "code": "رياضيات",
+          "aliases": [
+            "رياضيات",
+            "ميكانيكا",
+            "جبر وتفاضل"
+          ],
+          "periods": 7,
+          "priority": 4,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "science_integrated",
+          "name": "العلوم المتكاملة / الفيزياء والكيمياء",
+          "code": "علوم",
+          "aliases": [
+            "فيزياء",
+            "كيمياء",
+            "احياء",
+            "علوم متكاملة"
+          ],
+          "periods": 5,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "humanities",
+          "name": "التاريخ والجغرافيا والفلسفة",
+          "code": "إنسانيات",
+          "aliases": [
+            "تاريخ",
+            "جغرافيا",
+            "فلسفة"
+          ],
+          "periods": 4,
+          "priority": 6,
+          "category": "CORE"
+        },
+        {
+          "id": "civics_pe",
+          "name": "التربية الوطنية والتربية الرياضية",
+          "code": "وطنية وبدنية",
+          "aliases": [
+            "وطنية",
+            "تربية وطنية",
+            "تربية رياضية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 2,
+      "name": "الصف الثاني الثانوي",
+      "code": "S2",
+      "shift_name": "فترة الثانوي العام",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 7,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الأجنبية الأولى (الإنجليزية)",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "English"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "category": "LANG"
+        },
+        {
+          "id": "second_lang",
+          "name": "اللغة الأجنبية الثانية (فرنسي/ألماني/إيطالي)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "إيطالي",
+            "لغة ثانية"
+          ],
+          "periods": 4,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات البحتة والتطبيقية",
+          "code": "رياضيات",
+          "aliases": [
+            "رياضيات",
+            "ميكانيكا",
+            "جبر وتفاضل"
+          ],
+          "periods": 7,
+          "priority": 4,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "science_integrated",
+          "name": "العلوم المتكاملة / الفيزياء والكيمياء",
+          "code": "علوم",
+          "aliases": [
+            "فيزياء",
+            "كيمياء",
+            "احياء",
+            "علوم متكاملة"
+          ],
+          "periods": 5,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "humanities",
+          "name": "التاريخ والجغرافيا والفلسفة",
+          "code": "إنسانيات",
+          "aliases": [
+            "تاريخ",
+            "جغرافيا",
+            "فلسفة"
+          ],
+          "periods": 4,
+          "priority": 6,
+          "category": "CORE"
+        },
+        {
+          "id": "civics_pe",
+          "name": "التربية الوطنية والتربية الرياضية",
+          "code": "وطنية وبدنية",
+          "aliases": [
+            "وطنية",
+            "تربية وطنية",
+            "تربية رياضية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 3,
+      "name": "الصف الثالث الثانوي",
+      "code": "S3",
+      "shift_name": "فترة الثانوي العام",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 7,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الأجنبية الأولى (الإنجليزية)",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "English"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "category": "LANG"
+        },
+        {
+          "id": "second_lang",
+          "name": "اللغة الأجنبية الثانية (فرنسي/ألماني/إيطالي)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "إيطالي",
+            "لغة ثانية"
+          ],
+          "periods": 4,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات البحتة والتطبيقية",
+          "code": "رياضيات",
+          "aliases": [
+            "رياضيات",
+            "ميكانيكا",
+            "جبر وتفاضل"
+          ],
+          "periods": 7,
+          "priority": 4,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "science_integrated",
+          "name": "العلوم المتكاملة / الفيزياء والكيمياء",
+          "code": "علوم",
+          "aliases": [
+            "فيزياء",
+            "كيمياء",
+            "احياء",
+            "علوم متكاملة"
+          ],
+          "periods": 5,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "humanities",
+          "name": "التاريخ والجغرافيا والفلسفة",
+          "code": "إنسانيات",
+          "aliases": [
+            "تاريخ",
+            "جغرافيا",
+            "فلسفة"
+          ],
+          "periods": 4,
+          "priority": 6,
+          "category": "CORE"
+        },
+        {
+          "id": "civics_pe",
+          "name": "التربية الوطنية والتربية الرياضية",
+          "code": "وطنية وبدنية",
+          "aliases": [
+            "وطنية",
+            "تربية وطنية",
+            "تربية رياضية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    }
+  ],
+  "rules": {
+    "break_after_period": 3,
+    "max_consecutive_same": 2
+  }
+}

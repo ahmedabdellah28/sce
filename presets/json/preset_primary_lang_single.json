@@ -1,0 +1,762 @@
+{
+  "id": "preset_primary_lang_single",
+  "name": "المرحلة الابتدائية — تجريبي رسمي لغات (فترة واحدة - 35 حصة)",
+  "label": "ابتدائي تجريبي لغات (35 حصة)",
+  "school_type": "EXPERIMENTAL_LANGUAGE",
+  "stage": "PRIMARY",
+  "shift_system": "SINGLE_SHIFT",
+  "description": "قيم شائعة قابلة للتعديل للمدارس الرسمية للغات (تجريبي): تدريس Mathematics و Science بالإنجليزية، ومنهج Connect Plus الموسع.",
+  "days": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "shifts": [
+    {
+      "name": "الفترة الكاملة",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "periods_by_day": {
+        "0": 7,
+        "1": 7,
+        "2": 7,
+        "3": 7,
+        "4": 7
+      },
+      "weekly_capacity": 35
+    }
+  ],
+  "grades": [
+    {
+      "grade_number": 1,
+      "name": "الصف الأول الابتدائي لغات",
+      "code": "G1",
+      "shift_name": "الفترة الكاملة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 8,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (الرياضيات بالإنجليزية)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "الرياضيات بالإنجليزية",
+            "رياضيات لغات"
+          ],
+          "periods": 7,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Connect Plus (مستوى رفيع)",
+          "code": "Connect+",
+          "aliases": [
+            "Connect Plus",
+            "كونكت بلس",
+            "مستوى رفيع انجليزي",
+            "English High Level"
+          ],
+          "periods": 7,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية",
+            "دين مسيحي"
+          ],
+          "periods": 5,
+          "priority": 4,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "tokkatsu",
+          "name": "أنشطة التوكاتسو",
+          "code": "توكاتسو",
+          "aliases": [
+            "توكاتسو"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية والبدنية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 4,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "رسم",
+            "Art",
+            "فنية"
+          ],
+          "periods": 3,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 2,
+      "name": "الصف الثاني الابتدائي لغات",
+      "code": "G2",
+      "shift_name": "الفترة الكاملة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 8,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (الرياضيات بالإنجليزية)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "الرياضيات بالإنجليزية",
+            "رياضيات لغات"
+          ],
+          "periods": 7,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Connect Plus (مستوى رفيع)",
+          "code": "Connect+",
+          "aliases": [
+            "Connect Plus",
+            "كونكت بلس",
+            "مستوى رفيع انجليزي",
+            "English High Level"
+          ],
+          "periods": 7,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية",
+            "دين مسيحي"
+          ],
+          "periods": 5,
+          "priority": 4,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "tokkatsu",
+          "name": "أنشطة التوكاتسو",
+          "code": "توكاتسو",
+          "aliases": [
+            "توكاتسو"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية والبدنية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 4,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "رسم",
+            "Art",
+            "فنية"
+          ],
+          "periods": 3,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 3,
+      "name": "الصف الثالث الابتدائي لغات",
+      "code": "G3",
+      "shift_name": "الفترة الكاملة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 8,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (الرياضيات بالإنجليزية)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "الرياضيات بالإنجليزية",
+            "رياضيات لغات"
+          ],
+          "periods": 7,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Connect Plus (مستوى رفيع)",
+          "code": "Connect+",
+          "aliases": [
+            "Connect Plus",
+            "كونكت بلس",
+            "مستوى رفيع انجليزي",
+            "English High Level"
+          ],
+          "periods": 7,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية",
+            "دين مسيحي"
+          ],
+          "periods": 5,
+          "priority": 4,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "tokkatsu",
+          "name": "أنشطة التوكاتسو",
+          "code": "توكاتسو",
+          "aliases": [
+            "توكاتسو"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية والبدنية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 4,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "رسم",
+            "Art",
+            "فنية"
+          ],
+          "periods": 3,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 4,
+      "name": "الصف الرابع الابتدائي لغات",
+      "code": "G4",
+      "shift_name": "الفترة الكاملة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 7,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (الرياضيات بالإنجليزية)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "الرياضيات لغات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Connect Plus (مستوى رفيع)",
+          "code": "Connect+",
+          "aliases": [
+            "Connect Plus",
+            "مستوى رفيع",
+            "English Advanced"
+          ],
+          "periods": 6,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "Science (العلوم بالإنجليزية)",
+          "code": "Science",
+          "aliases": [
+            "Science",
+            "العلوم لغات",
+            "ساينس"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات",
+            "Social Studies"
+          ],
+          "periods": 3,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية دينية"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "ict",
+          "name": "تكنولوجيا المعلومات ICT",
+          "code": "ICT",
+          "aliases": [
+            "ICT",
+            "تكنولوجيا لغات"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "skills",
+          "name": "المهارات المهنية",
+          "code": "مهارات",
+          "aliases": [
+            "مهارات مهنية"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "PE",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "Art",
+            "رسم"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "second_lang",
+          "name": "لغة أجنبية ثانية (استكشافية)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "لغة ثانية",
+            "French",
+            "German"
+          ],
+          "periods": 1,
+          "category": "LANG"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 5,
+      "name": "الصف الخامس الابتدائي لغات",
+      "code": "G5",
+      "shift_name": "الفترة الكاملة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 7,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (الرياضيات بالإنجليزية)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "الرياضيات لغات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Connect Plus (مستوى رفيع)",
+          "code": "Connect+",
+          "aliases": [
+            "Connect Plus",
+            "مستوى رفيع",
+            "English Advanced"
+          ],
+          "periods": 6,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "Science (العلوم بالإنجليزية)",
+          "code": "Science",
+          "aliases": [
+            "Science",
+            "العلوم لغات",
+            "ساينس"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات",
+            "Social Studies"
+          ],
+          "periods": 3,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية دينية"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "ict",
+          "name": "تكنولوجيا المعلومات ICT",
+          "code": "ICT",
+          "aliases": [
+            "ICT",
+            "تكنولوجيا لغات"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "skills",
+          "name": "المهارات المهنية",
+          "code": "مهارات",
+          "aliases": [
+            "مهارات مهنية"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "PE",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "Art",
+            "رسم"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "second_lang",
+          "name": "لغة أجنبية ثانية (استكشافية)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "لغة ثانية",
+            "French",
+            "German"
+          ],
+          "periods": 1,
+          "category": "LANG"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 6,
+      "name": "الصف السادس الابتدائي لغات",
+      "code": "G6",
+      "shift_name": "الفترة الكاملة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 7,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (الرياضيات بالإنجليزية)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "الرياضيات لغات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Connect Plus (مستوى رفيع)",
+          "code": "Connect+",
+          "aliases": [
+            "Connect Plus",
+            "مستوى رفيع",
+            "English Advanced"
+          ],
+          "periods": 6,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "Science (العلوم بالإنجليزية)",
+          "code": "Science",
+          "aliases": [
+            "Science",
+            "العلوم لغات",
+            "ساينس"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات",
+            "Social Studies"
+          ],
+          "periods": 3,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية دينية"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "ict",
+          "name": "تكنولوجيا المعلومات ICT",
+          "code": "ICT",
+          "aliases": [
+            "ICT",
+            "تكنولوجيا لغات"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "skills",
+          "name": "المهارات المهنية",
+          "code": "مهارات",
+          "aliases": [
+            "مهارات مهنية"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "PE",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "Art",
+            "رسم"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "second_lang",
+          "name": "لغة أجنبية ثانية (استكشافية)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "لغة ثانية",
+            "French",
+            "German"
+          ],
+          "periods": 1,
+          "category": "LANG"
+        }
+      ],
+      "weekly_total": 35
+    }
+  ],
+  "rules": {
+    "break_after_period": 3,
+    "max_consecutive_same": 2
+  }
+}

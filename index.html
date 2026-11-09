@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI School Timetable Studio</title>
+    <meta name="description" content="نظام ذكي متكامل لفهم وتحليل وتنظيم وإنشاء جداول الحصص المدرسية بالذكاء الاصطناعي (Gemini AI) ومحرك القيود والاستمثال المتقدم (TypeScript Solver) مع تصدير PDF و Excel." />
+    <script>
+      // Defensive fix for AI Studio sandbox read-only window.fetch getter
+      (function() {
+        try {
+          const desc = Object.getOwnPropertyDescriptor(window, 'fetch');
+          if (desc && desc.get && !desc.set) {
+            let _currentFetch = desc.get.call(window);
+            Object.defineProperty(window, 'fetch', {
+              get() { return _currentFetch; },
+              set(fn) { _currentFetch = fn; },
+              configurable: true,
+              enumerable: true
+            });
+          }
+        } catch (e) {
+          console.warn('Sandbox fetch patch bypassed:', e);
+        }
+      })();
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

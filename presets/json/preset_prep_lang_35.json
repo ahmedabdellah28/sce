@@ -1,0 +1,447 @@
+{
+  "id": "preset_prep_lang_35",
+  "name": "المرحلة الإعدادية — تجريبي رسمي لغات (فترة واحدة - 35 حصة)",
+  "label": "إعدادي تجريبي لغات (35 حصة)",
+  "school_type": "EXPERIMENTAL_LANGUAGE",
+  "stage": "PREPARATORY",
+  "shift_system": "SINGLE_SHIFT",
+  "description": "قيم شائعة قابلة للتعديل للمدارس الإعدادية للغات: تدريس Math و Science بالإنجليزية، ولغة ثانية (فرنسي/ألماني 3 حصص)، وإنجليزي متقدم.",
+  "days": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "shifts": [
+    {
+      "name": "الفترة الكاملة (إعدادي 35)",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "periods_by_day": {
+        "0": 7,
+        "1": 7,
+        "2": 7,
+        "3": 7,
+        "4": 7
+      },
+      "weekly_capacity": 35
+    }
+  ],
+  "grades": [
+    {
+      "grade_number": 1,
+      "name": "الصف الأول الإعدادي لغات",
+      "code": "G1",
+      "shift_name": "الفترة الكاملة (إعدادي 35)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 6,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (جبر وهندسة لغات)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "Mathematics",
+            "رياضيات لغات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Advanced Level (مستوى رفيع)",
+          "code": "AL",
+          "aliases": [
+            "English AL",
+            "مستوى رفيع انجليزي",
+            "Advanced Level"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "Science (العلوم بالإنجليزية)",
+          "code": "Science",
+          "aliases": [
+            "Science",
+            "ساينس"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 4,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "second_lang",
+          "name": "اللغة الأجنبية الثانية (French / German)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "لغة ثانية",
+            "French",
+            "German"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 2,
+          "priority": 7,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "computer",
+          "name": "Computer & Information Tech",
+          "code": "Computer",
+          "aliases": [
+            "كمبيوتر",
+            "حاسب",
+            "Computer"
+          ],
+          "periods": 2,
+          "category": "TECH"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "رسم",
+            "Art",
+            "فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "PE",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 2,
+      "name": "الصف الثاني الإعدادي لغات",
+      "code": "G2",
+      "shift_name": "الفترة الكاملة (إعدادي 35)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 6,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (جبر وهندسة لغات)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "Mathematics",
+            "رياضيات لغات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Advanced Level (مستوى رفيع)",
+          "code": "AL",
+          "aliases": [
+            "English AL",
+            "مستوى رفيع انجليزي",
+            "Advanced Level"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "Science (العلوم بالإنجليزية)",
+          "code": "Science",
+          "aliases": [
+            "Science",
+            "ساينس"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 4,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "second_lang",
+          "name": "اللغة الأجنبية الثانية (French / German)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "لغة ثانية",
+            "French",
+            "German"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 2,
+          "priority": 7,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "computer",
+          "name": "Computer & Information Tech",
+          "code": "Computer",
+          "aliases": [
+            "كمبيوتر",
+            "حاسب",
+            "Computer"
+          ],
+          "periods": 2,
+          "category": "TECH"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "رسم",
+            "Art",
+            "فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "PE",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    },
+    {
+      "grade_number": 3,
+      "name": "الصف الثالث الإعدادي لغات",
+      "code": "G3",
+      "shift_name": "الفترة الكاملة (إعدادي 35)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 6,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "Mathematics (جبر وهندسة لغات)",
+          "code": "Math",
+          "aliases": [
+            "Math",
+            "Mathematics",
+            "رياضيات لغات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "English Advanced Level (مستوى رفيع)",
+          "code": "AL",
+          "aliases": [
+            "English AL",
+            "مستوى رفيع انجليزي",
+            "Advanced Level"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "Science (العلوم بالإنجليزية)",
+          "code": "Science",
+          "aliases": [
+            "Science",
+            "ساينس"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 4,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "second_lang",
+          "name": "اللغة الأجنبية الثانية (French / German)",
+          "code": "لغة ثانية",
+          "aliases": [
+            "فرنساوي",
+            "ألماني",
+            "لغة ثانية",
+            "French",
+            "German"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 2,
+          "priority": 7,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "computer",
+          "name": "Computer & Information Tech",
+          "code": "Computer",
+          "aliases": [
+            "كمبيوتر",
+            "حاسب",
+            "Computer"
+          ],
+          "periods": 2,
+          "category": "TECH"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "Art",
+          "aliases": [
+            "رسم",
+            "Art",
+            "فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "PE",
+          "aliases": [
+            "العاب",
+            "PE"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 35
+    }
+  ],
+  "rules": {
+    "break_after_period": 3,
+    "max_consecutive_same": 2
+  }
+}

@@ -1,0 +1,717 @@
+{
+  "id": "preset_primary_gov_two_shifts",
+  "name": "المرحلة الابتدائية — حكومي عام فترتان (صباحي 29 حصة / مسائي 36 حصة)",
+  "label": "ابتدائي حكومي فترتان (29/36 حصة)",
+  "school_type": "GOVERNMENT_GENERAL",
+  "stage": "PRIMARY",
+  "shift_system": "TWO_SHIFTS",
+  "description": "قيم شائعة قابلة للتعديل للمدارس ذات الكثافات ونظام الفترتين: صفوف 1-3 صباحي (29 حصة)، صفوف 4-6 مسائي (36 حصة مع يوم 8 حصص).",
+  "days": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "shifts": [
+    {
+      "name": "الفترة الصباحية (صفوف 1-3)",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "periods_by_day": {
+        "0": 6,
+        "1": 6,
+        "2": 6,
+        "3": 6,
+        "4": 5
+      },
+      "weekly_capacity": 29
+    },
+    {
+      "name": "الفترة المسائية (صفوف 4-6)",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "periods_by_day": {
+        "0": 7,
+        "1": 8,
+        "2": 7,
+        "3": 7,
+        "4": 7
+      },
+      "weekly_capacity": 36
+    }
+  ],
+  "grades": [
+    {
+      "grade_number": 1,
+      "name": "الصف الأول الابتدائي",
+      "code": "G1",
+      "shift_name": "الفترة الصباحية (صفوف 1-3)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 9,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات",
+          "code": "رياضيات",
+          "aliases": [
+            "حساب",
+            "رياضيات"
+          ],
+          "periods": 7,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "لغة انجليزية"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 5,
+          "priority": 4,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "tokkatsu",
+          "name": "أنشطة التوكاتسو",
+          "code": "توكاتسو",
+          "aliases": [
+            "توكاتسو"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية والبدنية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "تربية بدنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 29
+    },
+    {
+      "grade_number": 2,
+      "name": "الصف الثاني الابتدائي",
+      "code": "G2",
+      "shift_name": "الفترة الصباحية (صفوف 1-3)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 9,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات",
+          "code": "رياضيات",
+          "aliases": [
+            "حساب",
+            "رياضيات"
+          ],
+          "periods": 7,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "لغة انجليزية"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 5,
+          "priority": 4,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "tokkatsu",
+          "name": "أنشطة التوكاتسو",
+          "code": "توكاتسو",
+          "aliases": [
+            "توكاتسو"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية والبدنية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "تربية بدنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 29
+    },
+    {
+      "grade_number": 3,
+      "name": "الصف الثالث الابتدائي",
+      "code": "G3",
+      "shift_name": "الفترة الصباحية (صفوف 1-3)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 9,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات",
+          "code": "رياضيات",
+          "aliases": [
+            "حساب",
+            "رياضيات"
+          ],
+          "periods": 7,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "لغة انجليزية"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 5,
+          "priority": 4,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "tokkatsu",
+          "name": "أنشطة التوكاتسو",
+          "code": "توكاتسو",
+          "aliases": [
+            "توكاتسو"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية والبدنية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "تربية بدنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 29
+    },
+    {
+      "grade_number": 4,
+      "name": "الصف الرابع الابتدائي",
+      "code": "G4",
+      "shift_name": "الفترة المسائية (صفوف 4-6)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 9,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات",
+          "code": "رياضيات",
+          "aliases": [
+            "حساب",
+            "رياضيات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "لغة انجليزية"
+          ],
+          "periods": 4,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "العلوم",
+          "code": "علوم",
+          "aliases": [
+            "علوم"
+          ],
+          "periods": 3,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 3,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 4,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "ict",
+          "name": "تكنولوجيا المعلومات ICT",
+          "code": "تكنولوجيا",
+          "aliases": [
+            "تكنولوجيا",
+            "ICT",
+            "حاسب"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "skills",
+          "name": "المهارات المهنية",
+          "code": "مهارات",
+          "aliases": [
+            "مهارات",
+            "مهارات مهنية"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "تربية رياضية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "فنية",
+          "aliases": [
+            "رسم",
+            "تربية فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "music",
+          "name": "الموسيقى والأنشطة",
+          "code": "موسيقى",
+          "aliases": [
+            "موسيقى",
+            "انشطة"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 36
+    },
+    {
+      "grade_number": 5,
+      "name": "الصف الخامس الابتدائي",
+      "code": "G5",
+      "shift_name": "الفترة المسائية (صفوف 4-6)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 9,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات",
+          "code": "رياضيات",
+          "aliases": [
+            "حساب",
+            "رياضيات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "لغة انجليزية"
+          ],
+          "periods": 4,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "العلوم",
+          "code": "علوم",
+          "aliases": [
+            "علوم"
+          ],
+          "periods": 3,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 3,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 4,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "ict",
+          "name": "تكنولوجيا المعلومات ICT",
+          "code": "تكنولوجيا",
+          "aliases": [
+            "تكنولوجيا",
+            "ICT",
+            "حاسب"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "skills",
+          "name": "المهارات المهنية",
+          "code": "مهارات",
+          "aliases": [
+            "مهارات",
+            "مهارات مهنية"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "تربية رياضية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "فنية",
+          "aliases": [
+            "رسم",
+            "تربية فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "music",
+          "name": "الموسيقى والأنشطة",
+          "code": "موسيقى",
+          "aliases": [
+            "موسيقى",
+            "انشطة"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 36
+    },
+    {
+      "grade_number": 6,
+      "name": "الصف السادس الابتدائي",
+      "code": "G6",
+      "shift_name": "الفترة المسائية (صفوف 4-6)",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 9,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات",
+          "code": "رياضيات",
+          "aliases": [
+            "حساب",
+            "رياضيات"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "لغة انجليزية"
+          ],
+          "periods": 4,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "العلوم",
+          "code": "علوم",
+          "aliases": [
+            "علوم"
+          ],
+          "periods": 3,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 3,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 4,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "ict",
+          "name": "تكنولوجيا المعلومات ICT",
+          "code": "تكنولوجيا",
+          "aliases": [
+            "تكنولوجيا",
+            "ICT",
+            "حاسب"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "skills",
+          "name": "المهارات المهنية",
+          "code": "مهارات",
+          "aliases": [
+            "مهارات",
+            "مهارات مهنية"
+          ],
+          "periods": 1,
+          "category": "TECH"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "تربية رياضية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "فنية",
+          "aliases": [
+            "رسم",
+            "تربية فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "music",
+          "name": "الموسيقى والأنشطة",
+          "code": "موسيقى",
+          "aliases": [
+            "موسيقى",
+            "انشطة"
+          ],
+          "periods": 1,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 36
+    }
+  ],
+  "rules": {
+    "break_after_period": 3,
+    "max_consecutive_same": 2
+  }
+}

@@ -1,0 +1,79 @@
+[
+  {
+    "id": "preset_primary_gov_single",
+    "name": "المرحلة الابتدائية — حكومي عام (فترة واحدة - 35 حصة)",
+    "label": "ابتدائي حكومي عام (35 حصة)",
+    "school_type": "GOVERNMENT_GENERAL",
+    "stage": "PRIMARY",
+    "shift_system": "SINGLE_SHIFT",
+    "description": "قيم شائعة قابلة للتعديل: 7 حصص يومياً (35 حصة أسبوعياً) للصفوف 1 إلى 6، تشمل تكنولوجيا المعلومات والمهارات والأنشطة.",
+    "total_grades": 6,
+    "weekly_periods": 35
+  },
+  {
+    "id": "preset_primary_gov_two_shifts",
+    "name": "المرحلة الابتدائية — حكومي عام فترتان (صباحي 29 حصة / مسائي 36 حصة)",
+    "label": "ابتدائي حكومي فترتان (29/36 حصة)",
+    "school_type": "GOVERNMENT_GENERAL",
+    "stage": "PRIMARY",
+    "shift_system": "TWO_SHIFTS",
+    "description": "قيم شائعة قابلة للتعديل للمدارس ذات الكثافات ونظام الفترتين: صفوف 1-3 صباحي (29 حصة)، صفوف 4-6 مسائي (36 حصة مع يوم 8 حصص).",
+    "total_grades": 6,
+    "weekly_periods": 29
+  },
+  {
+    "id": "preset_primary_lang_single",
+    "name": "المرحلة الابتدائية — تجريبي رسمي لغات (فترة واحدة - 35 حصة)",
+    "label": "ابتدائي تجريبي لغات (35 حصة)",
+    "school_type": "EXPERIMENTAL_LANGUAGE",
+    "stage": "PRIMARY",
+    "shift_system": "SINGLE_SHIFT",
+    "description": "قيم شائعة قابلة للتعديل للمدارس الرسمية للغات (تجريبي): تدريس Mathematics و Science بالإنجليزية، ومنهج Connect Plus الموسع.",
+    "total_grades": 6,
+    "weekly_periods": 35
+  },
+  {
+    "id": "preset_prep_gov_35",
+    "name": "المرحلة الإعدادية — حكومي عام (فترة واحدة - 35 حصة)",
+    "label": "إعدادي حكومي عام (35 حصة)",
+    "school_type": "GOVERNMENT_GENERAL",
+    "stage": "PREPARATORY",
+    "shift_system": "SINGLE_SHIFT",
+    "description": "قيم شائعة قابلة للتعديل للمرحلة الإعدادية: 7 حصص يومياً (35 حصة)، توزيع متوازن للغات والعلوم والأنشطة والحاسب.",
+    "total_grades": 3,
+    "weekly_periods": 35
+  },
+  {
+    "id": "preset_prep_gov_36",
+    "name": "المرحلة الإعدادية — حكومي عام (نظام 36 حصة - الأحد 8 وباقي الأيام 7)",
+    "label": "إعدادي حكومي (36 حصة - نموذج 376)",
+    "school_type": "GOVERNMENT_GENERAL",
+    "stage": "PREPARATORY",
+    "shift_system": "SINGLE_SHIFT",
+    "description": "قيم شائعة قابلة للتعديل: الأحد 8 حصص وباقي الأيام 7 حصص (إجمالي 36 حصة أسبوعياً لكل فصل).",
+    "total_grades": 3,
+    "weekly_periods": 36
+  },
+  {
+    "id": "preset_prep_lang_35",
+    "name": "المرحلة الإعدادية — تجريبي رسمي لغات (فترة واحدة - 35 حصة)",
+    "label": "إعدادي تجريبي لغات (35 حصة)",
+    "school_type": "EXPERIMENTAL_LANGUAGE",
+    "stage": "PREPARATORY",
+    "shift_system": "SINGLE_SHIFT",
+    "description": "قيم شائعة قابلة للتعديل للمدارس الإعدادية للغات: تدريس Math و Science بالإنجليزية، ولغة ثانية (فرنسي/ألماني 3 حصص)، وإنجليزي متقدم.",
+    "total_grades": 3,
+    "weekly_periods": 35
+  },
+  {
+    "id": "preset_sec_gov_35",
+    "name": "المرحلة الثانوية العامة — حكومي عام (فترة واحدة - 35 حصة)",
+    "label": "ثانوي عام حكومي (35 حصة)",
+    "school_type": "GOVERNMENT_GENERAL",
+    "stage": "SECONDARY",
+    "shift_system": "SINGLE_SHIFT",
+    "description": "قيم شائعة قابلة للتعديل للمرحلة الثانوية: 7 حصص يومياً (35 حصة)، تشمل اللغتين الأولى والثانية والرياضيات والعلوم المتكاملة.",
+    "total_grades": 3,
+    "weekly_periods": 35
+  }
+]

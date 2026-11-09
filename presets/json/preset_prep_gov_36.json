@@ -1,0 +1,390 @@
+{
+  "id": "preset_prep_gov_36",
+  "name": "المرحلة الإعدادية — حكومي عام (نظام 36 حصة - الأحد 8 وباقي الأيام 7)",
+  "label": "إعدادي حكومي (36 حصة - نموذج 376)",
+  "school_type": "GOVERNMENT_GENERAL",
+  "stage": "PREPARATORY",
+  "shift_system": "SINGLE_SHIFT",
+  "description": "قيم شائعة قابلة للتعديل: الأحد 8 حصص وباقي الأيام 7 حصص (إجمالي 36 حصة أسبوعياً لكل فصل).",
+  "days": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "shifts": [
+    {
+      "name": "فترة الإعدادي 36 حصة",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "periods_by_day": {
+        "0": 8,
+        "1": 7,
+        "2": 7,
+        "3": 7,
+        "4": 7
+      },
+      "weekly_capacity": 36
+    }
+  ],
+  "grades": [
+    {
+      "grade_number": 1,
+      "name": "الصف الأول الإعدادي",
+      "code": "G1",
+      "shift_name": "فترة الإعدادي 36 حصة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية والخط",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 8,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات (جبر وهندسة)",
+          "code": "رياضيات",
+          "aliases": [
+            "رياضيات",
+            "جبر",
+            "هندسة"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "English"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "العلوم",
+          "code": "علوم",
+          "aliases": [
+            "علوم"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 4,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "computer",
+          "name": "الكمبيوتر وتكنولوجيا المعلومات",
+          "code": "حاسب",
+          "aliases": [
+            "حاسب",
+            "كمبيوتر"
+          ],
+          "periods": 2,
+          "category": "TECH"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "فنية",
+          "aliases": [
+            "رسم",
+            "فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "رياضة بدنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 36
+    },
+    {
+      "grade_number": 2,
+      "name": "الصف الثاني الإعدادي",
+      "code": "G2",
+      "shift_name": "فترة الإعدادي 36 حصة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية والخط",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 8,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات (جبر وهندسة)",
+          "code": "رياضيات",
+          "aliases": [
+            "رياضيات",
+            "جبر",
+            "هندسة"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "English"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "العلوم",
+          "code": "علوم",
+          "aliases": [
+            "علوم"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 4,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "computer",
+          "name": "الكمبيوتر وتكنولوجيا المعلومات",
+          "code": "حاسب",
+          "aliases": [
+            "حاسب",
+            "كمبيوتر"
+          ],
+          "periods": 2,
+          "category": "TECH"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "فنية",
+          "aliases": [
+            "رسم",
+            "فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "رياضة بدنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 36
+    },
+    {
+      "grade_number": 3,
+      "name": "الصف الثالث الإعدادي",
+      "code": "G3",
+      "shift_name": "فترة الإعدادي 36 حصة",
+      "subjects": [
+        {
+          "id": "arabic",
+          "name": "اللغة العربية والخط",
+          "code": "عربي",
+          "aliases": [
+            "عربي",
+            "لغة عربية"
+          ],
+          "periods": 8,
+          "priority": 1,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "math",
+          "name": "الرياضيات (جبر وهندسة)",
+          "code": "رياضيات",
+          "aliases": [
+            "رياضيات",
+            "جبر",
+            "هندسة"
+          ],
+          "periods": 6,
+          "priority": 2,
+          "double_policy": "PREFER_DOUBLE",
+          "category": "CORE"
+        },
+        {
+          "id": "english",
+          "name": "اللغة الإنجليزية",
+          "code": "إنجليزي",
+          "aliases": [
+            "انجليزي",
+            "English"
+          ],
+          "periods": 5,
+          "priority": 3,
+          "category": "LANG"
+        },
+        {
+          "id": "science",
+          "name": "العلوم",
+          "code": "علوم",
+          "aliases": [
+            "علوم"
+          ],
+          "periods": 4,
+          "priority": 4,
+          "category": "CORE"
+        },
+        {
+          "id": "social",
+          "name": "الدراسات الاجتماعية",
+          "code": "دراسات",
+          "aliases": [
+            "دراسات"
+          ],
+          "periods": 4,
+          "priority": 5,
+          "category": "CORE"
+        },
+        {
+          "id": "religion",
+          "name": "التربية الدينية",
+          "code": "دين",
+          "aliases": [
+            "دين",
+            "تربية اسلامية"
+          ],
+          "periods": 3,
+          "priority": 6,
+          "before_break": true,
+          "category": "CORE"
+        },
+        {
+          "id": "computer",
+          "name": "الكمبيوتر وتكنولوجيا المعلومات",
+          "code": "حاسب",
+          "aliases": [
+            "حاسب",
+            "كمبيوتر"
+          ],
+          "periods": 2,
+          "category": "TECH"
+        },
+        {
+          "id": "art",
+          "name": "التربية الفنية",
+          "code": "فنية",
+          "aliases": [
+            "رسم",
+            "فنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        },
+        {
+          "id": "pe",
+          "name": "التربية الرياضية",
+          "code": "ألعاب",
+          "aliases": [
+            "العاب",
+            "رياضة بدنية"
+          ],
+          "periods": 2,
+          "category": "ACTIVITY"
+        }
+      ],
+      "weekly_total": 36
+    }
+  ],
+  "rules": {
+    "break_after_period": 4,
+    "max_consecutive_same": 2
+  }
+}

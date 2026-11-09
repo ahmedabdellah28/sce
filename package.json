@@ -1,0 +1,36 @@
+{
+  "name": "ai-school-timetable-studio",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "tsx server.ts",
+    "lint": "tsc --noEmit",
+    "test:presets": "tsx scripts/test_presets_integrity.ts",
+    "test:wizard": "tsx scripts/test_wizard_stepper.ts",
+    "test:layout": "tsx scripts/test_layout_rtl.ts",
+    "test:diff": "tsx scripts/test_diff_engine.ts",
+    "test": "node --experimental-strip-types --no-warnings --import tsx --test services/scheduler.test.ts && tsx scripts/test_presets_integrity.ts && tsx scripts/test_wizard_stepper.ts && tsx scripts/test_layout_rtl.ts && tsx scripts/test_diff_engine.ts && tsx scripts/e2e_comprehensive_test.ts && tsx scripts/test_dialects_and_chat.ts && tsx scripts/test_moteer_integration.ts && tsx scripts/test_exports.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^3.0.0",
+    "express": "^5.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsx": "^4.23.15",
+    "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/express": "^5.0.6",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.2",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^5.7.2",
+    "vite": "^6.1.0"
+  }
+}
