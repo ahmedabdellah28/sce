@@ -1079,7 +1079,11 @@ function extractDaysMentions(normText: string): number[] {
 }
 
 function extractPeriodCountNumber(normFragment: string): number | null {
-  const cleaned = normFragment.replace(/\d+\s*ايام|\b[1-3]\s*\/\s*[1-9]\b/g, " ");
+  // Strip Arabic weekday names & section codes FIRST so "الأربعاء"/"أربع" never masquerades as 4 periods!
+  const cleaned = normFragment
+    .replace(/\d+\s*ايام|\b[1-3]\s*\/\s*[1-9]\b/g, " ")
+    .replace(/(?:^|\s)(?:ال)?(?:سبت|احد|اثنين|اتنين|ثلاثاء|تلات|اربعاء|اربع|خميس)(?=\s|$)/g, " ")
+    .replace(/\s+/g, " ");
   const wordNumMap: Record<string, number> = {
     اربع: 4, اربعه: 4, خمس: 5, خمسه: 5, ست: 6, سته: 6,
     سبع: 7, سبعه: 7, تمن: 8, ثمان: 8, ثمانيه: 8, تسع: 9, عشر: 10,
@@ -1087,7 +1091,7 @@ function extractPeriodCountNumber(normFragment: string): number | null {
   for (const rx of [
     /(?:الحصص|حصص|اليومي[ةه]?|في\s*اليوم|لـ?|الي|بقي|بقى)\s*(\d{1,2})\s*(?:حص[ةهص])?/g,
     /(\d{1,2})\s*حص[ةهص]/g,
-    /\b([4-9]|10)\b/g,
+    /(?:^|\s)([4-9]|10)(?=\s|$)/g,
   ]) {
     for (const m of cleaned.matchAll(rx)) {
       const v = Number(m[1]);
@@ -1095,7 +1099,7 @@ function extractPeriodCountNumber(normFragment: string): number | null {
     }
   }
   for (const [w, val] of Object.entries(wordNumMap)) {
-    if (cleaned.includes(w)) return val;
+    if (new RegExp(`(?:^|\\s)${w}(?:\\s|$)`).test(cleaned)) return val;
   }
   return null;
 }
@@ -1129,8 +1133,27 @@ export function tryApplyDailyPeriodsChatCommand(
   const n = normalizeSubjectText(message);
   if (!n) return null;
 
-  // Ignore teacher-specific rules (e.g., "خلي احمد ياخد حصتين يوم الخميس")
-  if (/(?:استاذ|مس|كابتن|معلم|مدرس|اجازه|اوف|مزدوج)/.test(n)) return null;
+  // Ignore teacher-specific rules or teacher-name mentions (e.g., "خلي صفاء...", "محمد طاهر الأحد...")
+  if (/(?:استاذ|مس|كابتن|معلم|مدرس|شيخ|اجازه|اوف|مزدوج|تفرغ|حضور|يداوم|تداوم|معفي|رضاع|لا يعمل|الحصص الاخيره|الحصص الاولي|اول حصص|اخر حصص)/.test(n)) {
+    return null;
+  }
+  const hasExplicitGradeScope =
+    /(?:اول[يى]|ثاني[ةه]|تاني[ةه]|ثالث[ةه]|تالت[ةه]|رابع[ةه]|خامس[ةه]|سادس[ةه])\s*(?:ابتدائي|اعدادي|ثانوي)|الصف\s+(?:ال)?(?:اول|ثاني|ثالث|رابع|خامس|سادس)/.test(
+      n
+    );
+  const nWithoutEarlyAdverb = n.replace(/(?:يمشوا|بيمشوا|يمشي|بيمشي|يطلع|بيطلع|يروح|بيروح)\s+بدري/g, " ");
+  const hasKnownTeacherMention =
+    !hasExplicitGradeScope &&
+    school.teachers.some((t) => {
+      const tn = normalizeSubjectText(t.name).replace(/\s*\(شاغر\)/g, "").trim();
+      if (tn.length < 3) return false;
+      if (nWithoutEarlyAdverb.includes(tn)) return true;
+      return tn
+        .split(" ")
+        .filter((w) => w.length >= 3 && !/^(?:سبت|احد|اثنين|اتنين|ثلاثاء|تلات|اربعاء|اربع|خميس|اولى|تانيه|ثانيه|تالته|ثالثه|عربي|دين|علوم|رسم|العاب)$/.test(w))
+        .some((w) => new RegExp(`(?:^|\\s)${w}(?:\\s|$)`).test(nWithoutEarlyAdverb));
+    });
+  if (hasKnownTeacherMention) return null;
 
   const hasExceptionClause = /(?:ما عدا|الا |باستثناء)/.test(n);
   const parts = n.split(/(?:ما عدا|الا |باستثناء)/);

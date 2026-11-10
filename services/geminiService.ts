@@ -41,6 +41,7 @@ import {
   tryExecuteExtendedAgentAction,
   buildLiveAgentContextDigest,
   sanitizePlacementRuleConflicts,
+  executeGeminiParsedResponse,
   type AgentUiActionType,
 } from "./agentMemoryEngine.ts";
 
@@ -218,16 +219,27 @@ export const AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Role & Ide
    - أجب بإجابة عربية وافية ودقيقة ومباشرة بناءً على أرقام وبيانات المدرسة والجدول المرفقة.
    - ضع "should_solve": false، و "applied_changes": [].
 
-2. وضع الأوامر والتعديلات (Modification & Scheduling Mode):
-   - عندما يطلب المستخدم تعديلاً صريحاً على الجدول أو المدرسة (مثل إعطاء إجازة، تبديل حصص، تعديل أنصبة، إضافة معلم، أو إنشاء/إعادة حل الجدول):
-   - قم بتحديث وثيقة Markdown وكائن SchoolData، وضع "should_solve": true، واذكر البنود المعدلة في "applied_changes".
+2. وضع الأوامر والتعديلات المهيكلة (Structured Ops Tool Calling):
+   - عند طلب أي تعديل على المدرسة أو المعلمين أو الحصص أو القيود، أعد مصفوفة "ops" بالعمليات الحتمية الدقيقة بدلاً من إعادة كتابة كائن المدرسة الضخم (اترك "updated_school": null عندما تستخدم "ops"):
+     • إجازة/أوف معلم: { "op": "set_teacher_days", "teacher": "الاسم", "off_days": [0..6] } أو { "op": "set_teacher_days", "teacher": "الاسم", "allow_days": [3] } (حيث السبت=6، الأحد=0، الاثنين=1، الثلاثاء=2، الأربعاء=3، الخميس=4).
+     • قيد موقع حصة لمعلم: { "op": "add_placement_rule", "teacher": "الاسم", "day": 0 أو null لكل الأيام, "type": "AVOID_FIRST"|"AVOID_LAST"|"AVOID_PERIODS"|"FIRST_N"|"LAST_N"|"EXACT_PERIODS"|"HAS_LAST", "n": 2, "periods": [1,2], "hard": true|false }.
+     • حد يومي لمعلم: { "op": "set_daily_count", "teacher": "الاسم", "day": 3, "count": 2, "rule_type": "MAX"|"EXACT"|"MIN", "hard": true }.
+     • حدود التتابع/يومي للمعلم: { "op": "set_teacher_limits", "teacher": "الاسم", "max_consecutive": 2, "max_daily": 5, "max_weekly": 20 }.
+     • إسناد/تعديل حصة فصل: { "op": "set_assignment", "section": "1/1", "subject": "التربية الدينية", "teacher": "الاسم", "periods": 3 }.
+     • تبديل/إضافة/حذف معلم أو فصل: { "op": "add_teacher"|"remove_teacher"|"replace_teacher"|"swap_teachers"|"add_section"|"remove_section", ... }.
+     • سياسة المزدوجة أو الفسحة: { "op": "set_double_policy", "subject": "...", "policy": "REQUIRED"|"SINGLE"|"FREE" } أو { "op": "set_subject_rule", "subject": "...", "before_break": true }.
+
+3. وضع الشات الفعلي والاستيضاح (Clarification & Advisory Dialogue):
+   - إذا كان الطلب غامضاً أو يؤثر على نطاق واسع بدون تحديد (مثل "ثبّت حصة العربي" دون فصل أو يوم)، لا تنفذ عمياء؛ اسأل المستخدم سؤالاً توضيحياً لطيفاً مع خيارات واضحة وضع "should_solve": false, "ops": [].
+   - إذا سأل المستخدم استشارة ("ينفع ندي فلان إجازة؟"، "ترشحلي مين؟") احسب الأرقام من بيانات المدرسة واشرح الرأي التربوي واعرض التنفيذ عند موافقته.
 
 # صيغة الإخراج الإلزامية (JSON Response Format)
 رد بصيغة JSON فقط بهذا الهيكل:
 {
   "reply": "الإجابة الوافية أو شرح التعديلات باللغة العربية",
-  "updated_markdown": "نص وثيقة المدرسة المحدث أو null إذا لم يكن هناك تعديل",
-  "updated_school": { ... SchoolData المحدث أو null إذا لم يكن هناك تعديل ... },
+  "ops": [],
+  "updated_markdown": null,
+  "updated_school": null,
   "should_solve": false,
   "applied_changes": []
 }`;
@@ -771,37 +783,15 @@ ${message}
         const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
         const noticePrefix = notices.length > 0 ? `${notices.join("\n")}\n\n` : "";
 
-        if (parsed.reply) {
-          const isMutation = parsed.should_solve === true && parsed.updated_school;
-          let validatedSchool: SchoolData = school;
-
-          if (isMutation) {
-            const check = validateSchoolDataSchema(parsed.updated_school);
-            if (check.valid && check.school) {
-              validatedSchool = check.school;
-            } else {
-              this.onKeyNotice?.(
-                `⚠️ تم تجاهل تعديل غير مكتمل في هيكل البيانات من النموذج؛ تم الاحتفاظ بالبيانات السليمة.`
-              );
-            }
-          }
-
-          const updatedMarkdown =
-            isMutation && typeof parsed.updated_markdown === "string" && parsed.updated_markdown.trim()
-              ? parsed.updated_markdown
-              : currentMarkdown;
-
-          const appliedChanges = isMutation && Array.isArray(parsed.applied_changes)
-            ? parsed.applied_changes.map(String)
-            : [];
-
+        if (parsed.reply || (Array.isArray(parsed.ops) && parsed.ops.length > 0)) {
+          const execRes = executeGeminiParsedResponse(school, currentMarkdown, parsed, validateSchoolDataSchema);
           return {
-            reply: noticePrefix + parsed.reply,
-            updated_markdown: updatedMarkdown,
-            updated_school: isMutation ? validatedSchool : school,
-            should_solve: Boolean(isMutation),
-            applied_changes: appliedChanges,
-            analysis: InBrowserSchoolEngine.analyzeSchool(isMutation ? validatedSchool : school),
+            reply: noticePrefix + execRes.reply,
+            updated_markdown: execRes.updated_markdown,
+            updated_school: execRes.updated_school,
+            should_solve: execRes.should_solve,
+            applied_changes: execRes.applied_changes,
+            analysis: InBrowserSchoolEngine.analyzeSchool(execRes.updated_school),
           };
         }
       } catch (err: unknown) {

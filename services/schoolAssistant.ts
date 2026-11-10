@@ -36,10 +36,10 @@ export function isQuestionOrInquiry(message: string): boolean {
   // Interrogative words at start (even after conversational connectors "و/طيب/طب") or memory/reserve lookups
   const nNoPrefix = n.replace(/^(?:طيب\s+|طب\s+|وبعدين\s+|وكمان\s+|كمان\s+|و\s*)/, "").trim();
   if (
-    /^(هل|مين|من|كام|كم|ما|ماذا|ماهو|ماهي|مت[يى]|امت[يى]|اين|فين|ازاي|كيف|ليه|ايش|شو|شنو|ايه|اي|ايهم|عرفني|قولي|اشرح|فحص|افحص|راجع|شوف|تقرير|احصائيات|ملخص|استفسار|سؤال|فكرني)(?:\s|$)/.test(
+    /^(هل|مين|من|كام|كم|ما|ماذا|ماهو|ماهي|مت[يى]|امت[يى]|اين|فين|ازاي|كيف|ليه|ايش|شو|شنو|ايه|اي|ايهم|عرفني|قولي|اشرح|فحص|افحص|راجع|شوف|تقرير|احصائيات|ملخص|استفسار|سؤال|فكرني|ينفع|لو|ممكن ندي)(?:\s|$)/.test(
       nNoPrefix
     ) ||
-    /(فاضي|متاح للاحتياطي|احتياطي|ايه اللي غيرناه|عملنا ايه|اخر تعديل كان|تاريخ المحادث[ةه]|امتى حص[ةه])/.test(n)
+    /(فاضي|متاح للاحتياطي|احتياطي|ايه اللي غيرناه|عملنا ايه|اخر تعديل كان|تاريخ المحادث[ةه]|امتى حص[ةه]|ترشحلي|اديهم لمين|مين انسب|هيحصل ضغط)/.test(n)
   ) {
     return true;
   }
@@ -128,7 +128,135 @@ export function answerSchoolQuestion(
   // -------------------------------------------------------------
   // 0B. Substitute / Free Teachers Lookup ("مين فاضي يوم الخميس الحصة 4؟" / "احتياطي")
   // -------------------------------------------------------------
-  if (/(فاضي|متاحين|احتياطي|اشراف|معندوش حصص|مش مشغول)/.test(n) && !/(تعارض|افحص)/.test(n)) {
+  // -------------------------------------------------------------
+  // 0A1. Feasibility / What-If Consultation ("ينفع ندي فلان إجازة الخميس؟")
+  // -------------------------------------------------------------
+  const isFeasibilityAsk =
+    /(?:ينفع|ممكن|هل يمكن|لو ادينا|لو عطينا|هيحصل ضغط|يؤثر|عادي لو)/.test(n) &&
+    /(?:اجاز[ةهت]|اوف|تفرغ|ضغط)/.test(n) &&
+    Boolean(ctxRes.teacher);
+  if (isFeasibilityAsk && ctxRes.teacher) {
+    const t = ctxRes.teacher;
+    const weeklyLoad = school.assignments
+      .filter((a) => a.teacher_id === t.id)
+      .reduce((s, a) => s + a.weekly_periods, 0);
+    const activeSchoolDays = school.days && school.days.length > 0 ? school.days : [6, 0, 1, 2, 3, 4];
+    const currentOffDays = activeSchoolDays.filter(
+      (d) => t.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF"
+    );
+    const candidateOff = ctxRes.days[0];
+    const candidateDayName = candidateOff !== undefined ? DAY_NAMES_AR[candidateOff] : undefined;
+    const isAlreadyOff = candidateOff !== undefined && currentOffDays.includes(candidateOff);
+    const nextOffCount =
+      candidateOff !== undefined && !isAlreadyOff ? currentOffDays.length + 1 : currentOffDays.length;
+    const remainingDays = Math.max(1, activeSchoolDays.length - nextOffCount);
+    const maxDaily = t.max_daily_periods || school.periods_per_day || 6;
+    const avgPerDay = +(weeklyLoad / remainingDays).toFixed(1);
+    const minNeededPerDay = Math.ceil(weeklyLoad / remainingDays);
+    const feasible = minNeededPerDay <= maxDaily;
+    const pressureNote = !feasible
+      ? `❌ غير ممكن رياضياً بدون تعديل الحد اليومي: متوسط المطلوب (${minNeededPerDay} حصص/يوم) يتجاوز الحد الأقصى للمعلم (${maxDaily}).`
+      : avgPerDay >= maxDaily - 0.5
+        ? `⚠️ ممكن لكنه سيسبب ضغطاً مرتفعاً (${avgPerDay} حصة يومياً في المتوسط بحد أقصى ${maxDaily} في اليوم).`
+        : `✅ ممكن ومريح جداً ولا يسبب ضغطاً: سيتوزع نصابه (${weeklyLoad} حصة) على ${remainingDays} أيام بمعدل ${avgPerDay} حصة يومياً (أقصى حد مسموح ${maxDaily}).`;
+
+    return {
+      answered: true,
+      is_query: true,
+      topic: "what_if_feasibility",
+      reply:
+        `📊 تحليل الجدوى للأستاذ "${t.name}":\n` +
+        `• النصاب الأسبوعي: ${weeklyLoad} حصة.\n` +
+        `• أيام الحضور الحالية: ${activeSchoolDays.length - currentOffDays.length} أيام` +
+        (currentOffDays.length > 0
+          ? ` (إجازاته الحالية: ${currentOffDays.map((d) => DAY_NAMES_AR[d]).join("، ")})`
+          : " (يعمل كل أيام الأسبوع حالياً)") +
+        `.\n` +
+        (candidateDayName && isAlreadyOff
+          ? `• يوم ${candidateDayName} هو بالفعل يوم إجازة رسمية له.`
+          : candidateDayName
+            ? `• عند منحه إجازة يوم ${candidateDayName}: ${pressureNote}\n\nهل تحب أنفذ إجازة يوم ${candidateDayName} للأستاذ ${t.name} الآن؟`
+            : `• متوسط نصابه اليومي الحالي: ${avgPerDay} حصة/يوم.`),
+    };
+  }
+
+  // -------------------------------------------------------------
+  // 0A2. Assignment / Teacher Recommendation Advisor ("ترشحلي أديهم لمين؟")
+  // -------------------------------------------------------------
+  const isRecommendationAsk =
+    /(?:ترشحلي|اديهم لمين|أديهم لمين|مين انسب|مين مناسب|نوزعها علي مين|اسندها لمين|نرشح مين|تقترح مين)/.test(n);
+  if (isRecommendationAsk) {
+    const neededMatch = message.match(/(\d+)\s*(?:حص[ةهص]|حصة)/);
+    const neededPeriods = neededMatch ? Number(neededMatch[1]) : 3;
+    const secLabel = ctxRes.section ? `لفصل ${ctxRes.section.name}` : "";
+    const subjObj = ctxRes.subject;
+    const subjLabel = subjObj ? subjObj.name : "المادة المطلوبة";
+
+    const ranked = school.teachers
+      .map((t) => {
+        const load = school.assignments
+          .filter((a) => a.teacher_id === t.id)
+          .reduce((s, a) => s + a.weekly_periods, 0);
+        const teachesSame = subjObj
+          ? t.subject_ids.includes(subjObj.id) ||
+            school.assignments.some((a) => a.teacher_id === t.id && a.subject_id === subjObj.id)
+          : false;
+        const teachesArabicIfReligion =
+          subjObj && /دين/.test(normAr(subjObj.name))
+            ? school.assignments.some((a) => {
+                const sn = school.subjects.find((x) => x.id === a.subject_id)?.name || "";
+                return a.teacher_id === t.id && /عربي/.test(normAr(sn));
+              })
+            : false;
+        const isVacancy = t.name.includes("شاغر") || /(?:^|\s)س\d*(?:\s|$)/.test(normAr(t.name));
+        const maxW = t.max_weekly_periods || 24;
+        const afterLoad = load + neededPeriods;
+        const fitsQuota = afterLoad <= maxW;
+        const score =
+          (teachesSame ? 100 : teachesArabicIfReligion ? 60 : isVacancy ? 50 : 0) +
+          (fitsQuota ? 30 : -100) +
+          Math.max(0, 30 - load);
+        return { t, load, afterLoad, maxW, teachesSame, teachesArabicIfReligion, isVacancy, fitsQuota, score };
+      })
+      .filter((x) => x.fitsQuota)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4);
+
+    if (ranked.length === 0) {
+      return {
+        answered: true,
+        is_query: true,
+        topic: "teacher_recommendation",
+        reply: `⚠️ جميع المعلمين قريبون من الحد الأقصى الأسبوعي؛ قد تحتاج لإضافة معلم جديد أو خانة شاغرة لاستيعاب ${neededPeriods} حصص (${subjLabel}).`,
+      };
+    }
+
+    const lines = ranked.map((r, idx) => {
+      const reason = r.teachesSame
+        ? `يدرّس ${subjLabel} بالفعل`
+        : r.teachesArabicIfReligion
+          ? "يدرّس اللغة العربية (تخصص قريب للدين)"
+          : r.isVacancy
+            ? "خانة شاغرة متاحة للتكليف"
+            : "نصابه الأسبوعي منخفض";
+      return `${idx + 1}. **${r.t.name}** — ${reason} (نصابُه ${r.load} ← سيصبح ${r.afterLoad} من ${r.maxW} حصة)`;
+    });
+
+    return {
+      answered: true,
+      is_query: true,
+      topic: "teacher_recommendation",
+      reply:
+        `💡 أنسب المرشحين لإسناد ${neededPeriods} حصص (${subjLabel}${secLabel ? ` ${secLabel}` : ""}):\n` +
+        lines.join("\n") +
+        `\n\nتحب أسند الـ ${neededPeriods} حصص (${subjLabel}${secLabel ? ` ${secLabel}` : ""}) لأي منهم؟ (اكتب مثلاً: "أديهم للأول" أو "أديهم لـ ${ranked[0].t.name}")`,
+    };
+  }
+
+  // -------------------------------------------------------------
+  // 0B. Substitute / Free Teachers Lookup ("مين فاضي يوم الخميس الحصة 4؟" / "احتياطي")
+  // -------------------------------------------------------------
+  if (/(?:^|\s)(?:فاضي|متاحين|احتياطي|اشراف|معندوش حصص|مش مشغول)(?:\s|$)/.test(n) && !/(تعارض|افحص|فاضيين|ترشحلي|اديهم لمين)/.test(n)) {
     const targetDay = ctxRes.days[0] ?? ctxRes.ctx.lastDay ?? school.days[0] ?? 0;
     const periodsFound = extractPeriodNumbersFromText(message);
     const targetPeriod = periodsFound[0] ?? ctxRes.ctx.lastPeriod ?? 1;

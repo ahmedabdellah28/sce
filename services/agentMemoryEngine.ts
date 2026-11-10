@@ -15,6 +15,7 @@ import {
   resolveTeacherFromMessage,
   findSubjectInMessage,
   generateSchoolMarkdown,
+  type Op,
 } from "./schoolCore.ts";
 import {
   findMatchingSubjectInSchool,
@@ -349,6 +350,68 @@ export function tryExecuteExtendedAgentAction(
 
   const resolved = resolveContextualEntities(message, school, history);
 
+  // 0. Pending Advisory Proposal Confirmation ("أيوه نفذه" / "تمام" / "أديهم للأول" / "أديهم لرفعت")
+  const lastAiMsg = Array.isArray(history)
+    ? [...history].reverse().find((h) => h.role === "ai" && !h.isError)
+    : undefined;
+  if (lastAiMsg && lastAiMsg.text) {
+    const offProposal = lastAiMsg.text.match(/هل تحب أنفذ إجازة يوم\s+([^\n]+?)\s+للأستاذ\s+([^\n؟]+?)\s+الآن/);
+    if (offProposal && /^(?:ايوه|أيوه|نعم|تمام|ماشي|موافق|اكيد|أكيد|طبعا|طبعاً|نفذ|نفذه|اعملها|طبقه|يلا|اوكي|ok)(?:\s|$)/.test(n)) {
+      const propDays = parseDaysList(offProposal[1]);
+      const propTeacher = school.teachers.find((t) => normAr(t.name) === normAr(offProposal[2].trim()));
+      if (propTeacher && propDays.length > 0) {
+        const ops: Op[] = [{ op: "set_teacher_days", teacher: propTeacher.name, off_days: propDays }];
+        const resOps = applyOps(school, ops);
+        if (resOps.changed || resOps.changes.length > 0) {
+          return {
+            handled: true,
+            reply:
+              `✓ تم تنفيذ التعديل كما طلبت:\n` +
+              resOps.changes.map((c) => `✓ ${c}`).join("\n") +
+              `\nوجاري إعادة توزيع الجدول بضمان 0% تعارضات.`,
+            updated_school: resOps.school,
+            updated_markdown: generateSchoolMarkdown(resOps.school, resOps.changes),
+            should_solve: true,
+            applied_changes: resOps.changes,
+          };
+        }
+      }
+    }
+
+    const assignProposal = lastAiMsg.text.match(/تحب أسند الـ\s*(\d+)\s*حصص\s*\(([^)]+?)(?:\s+لفصل\s+([^\s)]+))?\)\s*لأي منهم/);
+    if (assignProposal && /(?:اديه|أديه|اسند|خليه|اختار|الأول|الاول|للاول|التاني|الثاني|للتاني|للثاني|التالت|الثالث|للتالت|للثالث)/.test(n)) {
+      const periodsCount = Number(assignProposal[1]);
+      const subjName = assignProposal[2].trim();
+      const secCode = assignProposal[3]?.trim();
+      let chosenTeacher = findTeachersInMessage(school, message)[0];
+      if (!chosenTeacher) {
+        const candidates = [...lastAiMsg.text.matchAll(/^\d+\.\s*\*\*([^*]+)\*\*/gm)].map((m) => m[1].trim());
+        const pickIdx = /(?:الأول|الاول|للاول)/.test(n) ? 0 : /(?:الثاني|التاني|للثاني|للتاني)/.test(n) ? 1 : /(?:الثالث|التالت|للثالث|للتالت)/.test(n) ? 2 : -1;
+        if (pickIdx >= 0 && candidates[pickIdx]) {
+          chosenTeacher = school.teachers.find((t) => normAr(t.name) === normAr(candidates[pickIdx]));
+        }
+      }
+      if (chosenTeacher && secCode) {
+        const ops: Op[] = [
+          { op: "set_assignment", section: secCode, subject: subjName, teacher: chosenTeacher.name, periods: periodsCount },
+        ];
+        const resOps = applyOps(school, ops);
+        if (resOps.changed || resOps.changes.length > 0) {
+          return {
+            handled: true,
+            reply:
+              `✓ تم إسناد ${periodsCount} حصص (${subjName}) لفصل ${secCode} للأستاذ "${chosenTeacher.name}" بنجاح.\n` +
+              `وجاري إعادة بناء وتوزيع الجدول الآن.`,
+            updated_school: resOps.school,
+            updated_markdown: generateSchoolMarkdown(resOps.school, resOps.changes),
+            should_solve: true,
+            applied_changes: resOps.changes,
+          };
+        }
+      }
+    }
+  }
+
   // 1. Direct Export & View Navigation UI Actions
   if (/(صدر|اطبع|طباعة|طباعه|حمل|تنزيل|اكسبورت|export)/.test(n)) {
     if (/(اكسيل|إكسيل|excel|xls)/.test(n)) {
@@ -455,6 +518,41 @@ export function tryExecuteExtendedAgentAction(
     const pinVal = !isUnpinCmd;
     const targetDay = resolved.days[0];
     const targetPeriod = resolved.periods[0];
+
+    // Clarification Guard: Prevent blind mass pinning on vague prompts like "ثبّت حصة العربي"
+    const wantsAllExplicitly = /(?:^|\s)(?:كل|الكل|جميع|كامل)(?:\s|$)/.test(n);
+    const matchingPre = schedule.entries.filter((e) => {
+      const matchSec = !resolved.section || e.section_id === resolved.section.id;
+      const matchTch = !resolved.teacher || e.teacher_id === resolved.teacher.id;
+      const matchSub = !resolved.subject || e.subject_id === resolved.subject.id;
+      const matchDay = targetDay === undefined || e.day === targetDay;
+      const matchPeriod = targetPeriod === undefined || e.period === targetPeriod;
+      return matchSec && matchTch && matchSub && matchDay && matchPeriod;
+    });
+
+    if (
+      pinVal &&
+      !wantsAllExplicitly &&
+      !resolved.section &&
+      !resolved.teacher &&
+      (targetDay === undefined || targetPeriod === undefined) &&
+      matchingPre.length > 6
+    ) {
+      const distinctSections = new Set(matchingPre.map((e) => e.section_id)).size;
+      const firstSecName = school.sections.find((s) => s.id === matchingPre[0].section_id)?.name || "1/1";
+      const firstDayName = DAY_NAMES_AR[matchingPre[0].day] || "الأحد";
+      const targetTopic = resolved.subject ? `لمادة "${resolved.subject.name}"` : "في الجدول";
+      return {
+        handled: true,
+        reply:
+          `🤔 يوجد ${matchingPre.length} حصة ${targetTopic} موزعة على ${distinctSections} فصول. أي حصة أو فصل تقصد تثبيتها تحديداً؟\n` +
+          `• للتثبيت الدقيق اكتب مثلاً: "ثبّت حصة ${resolved.subject?.name || "المادة"} لفصل ${firstSecName} يوم ${firstDayName} الحصة ${matchingPre[0].period}"\n` +
+          `• أو اكتب: "ثبّت كل حصص ${resolved.subject?.name || "الجدول"}" لتثبيتها جميعاً دفعة واحدة.`,
+        should_solve: false,
+        applied_changes: [],
+      };
+    }
+
     let changedCount = 0;
 
     const nextEntries = schedule.entries.map((e) => {
@@ -826,7 +924,7 @@ export function tryExecuteExtendedAgentAction(
         .trim();
       const parsed = parseRuleText(strippedBody, getOrderedSchoolDays(school));
       if (parsed.rules.length > 0) {
-        const ops = parsed.rules.map((r) => ({
+        const ops: Op[] = parsed.rules.map((r) => ({
           op: "add_placement_rule" as const,
           teacher: targetTeacher.name,
           day: r.day,
@@ -843,6 +941,164 @@ export function tryExecuteExtendedAgentAction(
             handled: true,
             reply:
               `✓ تم تنفيذ التعديل المطلوب بنجاح وتحديث وثيقة المدرسة (.md):\n` +
+              appliedChanges.map((c) => `✓ ${c}`).join("\n") +
+              `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`,
+            updated_school: cleanSchool,
+            updated_markdown: generateSchoolMarkdown(cleanSchool, appliedChanges),
+            should_solve: true,
+            applied_changes: appliedChanges,
+          };
+        }
+      }
+    }
+  }
+
+  // 9B. Single-Teacher Complex / Compound Rule Handler (prevents schoolCore isLastSlots/isFirstSlots from dropping off_days or day_counts)
+  const hasExplicitGradeScope =
+    /(?:اول[يى]|ثاني[ةه]|تاني[ةه]|ثالث[ةه]|تالت[ةه]|رابع[ةه]|خامس[ةه]|سادس[ةه])\s*(?:ابتدائي|اعدادي|ثانوي)|الصف\s+(?:ال)?(?:اول|ثاني|ثالث|رابع|خامس|سادس)/.test(
+      n
+    ) && !/(?:استاذ|مس|كابتن|معلم|مدرس|شيخ)/.test(n);
+  if (!/(?:بدل|استبدل|شيل.*وحط|مع بعض)/.test(n) && !hasExplicitGradeScope) {
+    const cleanMsgForTeachers = message
+      .replace(/(?:يمشوا|بيمشوا|يمشي|بيمشي|يطلع|بيطلع|يروح|بيروح)\s+بدري/g, " ")
+      .replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ");
+    const singleTeachers = findTeachersInMessage(school, cleanMsgForTeachers);
+    if (singleTeachers.length === 1) {
+      const targetTeacher = singleTeachers[0];
+      const strippedBody = message
+        .replace(new RegExp(targetTeacher.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), " ")
+        .trim();
+      const parsed = parseRuleText(strippedBody, getOrderedSchoolDays(school));
+      const hasCompoundRules =
+        (parsed.off_days.length > 0 && (parsed.rules.length > 0 || parsed.day_counts.length > 0)) ||
+        (parsed.day_counts.length > 0 && parsed.rules.length > 0);
+      if (hasCompoundRules) {
+        const ops: Op[] = [];
+        if (parsed.off_days.length > 0) {
+          ops.push({ op: "set_teacher_days", teacher: targetTeacher.name, off_days: parsed.off_days });
+        }
+        for (const r of parsed.rules) {
+          const dayCap = parsed.day_counts.find((dc) => dc.day === r.day && dc.type === "MAX")?.count;
+          const nAdj = (r.type === "FIRST_N" || r.type === "LAST_N") && dayCap && (r.n || 4) > dayCap ? dayCap : r.n;
+          ops.push({
+            op: "add_placement_rule",
+            teacher: targetTeacher.name,
+            day: r.day,
+            type: r.type,
+            n: nAdj,
+            periods: r.periods,
+            hard: r.hard,
+          });
+        }
+        for (const dc of parsed.day_counts) {
+          ops.push({
+            op: "set_daily_count",
+            teacher: targetTeacher.name,
+            day: dc.day,
+            count: dc.count,
+            rule_type: dc.type,
+            hard: true,
+          });
+        }
+        if (ops.length > 0) {
+          const resOps = applyOps(school, ops);
+          if (resOps.changed || resOps.changes.length > 0) {
+            const cleanSchool = sanitizePlacementRuleConflicts(resOps.school, ops);
+            const appliedChanges = resOps.changes;
+            return {
+              handled: true,
+              reply:
+                `✓ تم تنفيذ التعديلات المركّبة بنجاح وتحديث وثيقة المدرسة (.md):\n` +
+                appliedChanges.map((c) => `✓ ${c}`).join("\n") +
+                `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`,
+              updated_school: cleanSchool,
+              updated_markdown: generateSchoolMarkdown(cleanSchool, appliedChanges),
+              should_solve: true,
+              applied_changes: appliedChanges,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 10. Compound Multi-Teacher Rule Dispatcher (e.g. "خلي الحصة الأخيرة يوم الأحد لناصر وبلاش لبدري وريا")
+  if (!/(?:بدل|استبدل|شيل.*وحط|مع بعض)/.test(n)) {
+    const multiTeachers = findTeachersInMessage(school, message.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " "));
+    if (multiTeachers.length >= 2) {
+      const sortedMatches = [...multiTeachers].sort(
+        (a, b) => message.indexOf(a.name) - message.indexOf(b.name)
+      );
+      const contrastSplit = message.split(/(?=\s+(?:وبلاش|بلاش|وما|ماعدا|وليس|دون|بدون|واما|أما)\s+)/);
+      const baseClause = contrastSplit[0] || message;
+      let sharedStrip = baseClause;
+      for (const t of sortedMatches) {
+        sharedStrip = sharedStrip.replace(new RegExp(t.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), " ");
+      }
+      const baseParsed = parseRuleText(sharedStrip, getOrderedSchoolDays(school));
+
+      const allOps: Op[] = [];
+      for (let idx = 0; idx < contrastSplit.length; idx++) {
+        const seg = contrastSplit[idx].trim();
+        const segTeachers = findTeachersInMessage(school, seg);
+        if (segTeachers.length === 0) continue;
+
+        let segBody = seg;
+        for (const t of segTeachers) {
+          segBody = segBody.replace(new RegExp(t.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), " ");
+        }
+        const segNorm = normAr(segBody);
+        const isSegNeg = /^(?:و\s*)?(?:بلاش|لا|ممنوع|بدون|دون|ماعدا|ليس)/.test(segNorm);
+        let segParsed = parseRuleText(segBody, getOrderedSchoolDays(school));
+
+        // Inherit slot/day from baseClause when trailing contrast says "وبلاش لبدري وريا"
+        if (segParsed.rules.length === 0 && isSegNeg && baseParsed.rules.length > 0) {
+          const inverted = baseParsed.rules.map((r) => {
+            if (r.type === "LAST_N" || r.type === "HAS_LAST") return { ...r, type: "AVOID_LAST" as const };
+            if (r.type === "FIRST_N") return { ...r, type: "AVOID_FIRST" as const };
+            if (r.type === "EXACT_PERIODS") return { ...r, type: "AVOID_PERIODS" as const };
+            return r;
+          });
+          segParsed = { ...baseParsed, rules: inverted };
+        }
+
+        for (const tch of segTeachers) {
+          if (segParsed.off_days.length > 0) {
+            allOps.push({ op: "set_teacher_days", teacher: tch.name, off_days: segParsed.off_days });
+          }
+          for (const r of segParsed.rules) {
+            allOps.push({
+              op: "add_placement_rule",
+              teacher: tch.name,
+              day: r.day,
+              type: r.type,
+              n: r.n,
+              periods: r.periods,
+              hard: r.hard,
+            });
+          }
+          for (const dc of segParsed.day_counts) {
+            allOps.push({
+              op: "set_daily_count",
+              teacher: tch.name,
+              day: dc.day,
+              count: dc.count,
+              rule_type: dc.type,
+              hard: true,
+            });
+          }
+        }
+      }
+
+      if (allOps.length > 0) {
+        const resOps = applyOps(school, allOps);
+        if (resOps.changed || resOps.changes.length > 0) {
+          const cleanSchool = sanitizePlacementRuleConflicts(resOps.school, allOps);
+          const appliedChanges = resOps.changes;
+          return {
+            handled: true,
+            reply:
+              `✓ تم تنفيذ التعديلات المتعددة للمعلمين بنجاح وتحديث وثيقة المدرسة (.md):\n` +
               appliedChanges.map((c) => `✓ ${c}`).join("\n") +
               `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`,
             updated_school: cleanSchool,
@@ -987,4 +1243,72 @@ export function buildLiveAgentContextDigest(
     `ملخص المعلمين والأنصبة (${school.teachers.length}): ${teacherSummary.join(" | ")}`,
     `المعلمون المتاحون للاحتياطي (أول 6 لكل حصة):\n${freeGridText}`,
   ].join("\n");
+}
+
+/**
+ * Executes structured `ops` returned by Gemini LLM deterministically via `applyOps`
+ * (with conflict cleanup), falling back safely to validated `updated_school` or Q&A text.
+ */
+export function executeGeminiParsedResponse(
+  school: SchoolData,
+  currentMarkdown: string,
+  parsed: any,
+  validateSchoolSchemaFn?: (candidate: any) => { valid: boolean; school?: SchoolData }
+): {
+  reply: string;
+  updated_markdown: string;
+  updated_school: SchoolData;
+  should_solve: boolean;
+  applied_changes: string[];
+} {
+  const opsList: Op[] = Array.isArray(parsed?.ops) ? parsed.ops : [];
+  if (opsList.length > 0) {
+    const resOps = applyOps(school, opsList);
+    if (resOps.changed || resOps.changes.length > 0) {
+      const cleanSchool = sanitizePlacementRuleConflicts(resOps.school, opsList);
+      const changes = resOps.changes;
+      const baseReply = typeof parsed?.reply === "string" && parsed.reply.trim()
+        ? parsed.reply.trim()
+        : "✓ تم تنفيذ التعديل المطلوب بنجاح:";
+      const hasChecklist = changes.every((c) => baseReply.includes(c));
+      return {
+        reply: hasChecklist
+          ? baseReply
+          : `${baseReply}\n${changes.map((c) => `✓ ${c}`).join("\n")}\nوجاري إعادة توزيع الجدول بضمان 0% تعارضات.`,
+        updated_markdown: generateSchoolMarkdown(cleanSchool, changes),
+        updated_school: cleanSchool,
+        should_solve: true,
+        applied_changes: changes,
+      };
+    }
+  }
+
+  const isMutation = parsed?.should_solve === true && Boolean(parsed?.updated_school);
+  let nextSchool = school;
+  let validMutation = isMutation;
+  if (isMutation && validateSchoolSchemaFn) {
+    const check = validateSchoolSchemaFn(parsed.updated_school);
+    if (check.valid && check.school) {
+      nextSchool = check.school;
+    } else {
+      validMutation = false;
+    }
+  } else if (isMutation && parsed?.updated_school) {
+    nextSchool = parsed.updated_school;
+  }
+
+  const updatedMarkdown =
+    validMutation && typeof parsed?.updated_markdown === "string" && parsed.updated_markdown.trim()
+      ? parsed.updated_markdown
+      : validMutation
+        ? generateSchoolMarkdown(nextSchool, Array.isArray(parsed?.applied_changes) ? parsed.applied_changes.map(String) : [])
+        : currentMarkdown;
+
+  return {
+    reply: String(parsed?.reply || "").trim() || "تم استلام طلبك.",
+    updated_markdown: updatedMarkdown,
+    updated_school: validMutation ? nextSchool : school,
+    should_solve: validMutation,
+    applied_changes: validMutation && Array.isArray(parsed?.applied_changes) ? parsed.applied_changes.map(String) : [],
+  };
 }

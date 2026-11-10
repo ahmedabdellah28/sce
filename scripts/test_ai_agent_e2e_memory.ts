@@ -193,6 +193,100 @@ async function runHumanFirstTimeSimulation() {
   );
   passed("16b. Browser cancellation phrasing ('الغاء الحصة الاولى يوم الاحد') -> AVOID_FIRST & sanitized stale FIRST_N");
 
+  // 16c. Multiple phrasing parity for single-day + max daily + last period rules (Safaa)
+  const rSafaa1 = await browserService.chatWithCopilot(
+    "عاوزين نريح مس صفاء، خليها تيجي الأربعاء بس، ومتاخدش أكتر من حصتين ويبقوا آخر اليوم",
+    school,
+    schedule,
+    "",
+    []
+  );
+  assert.equal(rSafaa1.should_solve, true);
+  assert.ok(rSafaa1.applied_changes.some((c) => c.includes("الخميس") && c.includes("إجازة")), `Missing off days: ${rSafaa1.applied_changes}`);
+  assert.ok(rSafaa1.applied_changes.some((c) => c.includes("حد أقصى 2 حصص يوم الأربعاء")), `Missing cap 2: ${rSafaa1.applied_changes}`);
+  assert.ok(rSafaa1.applied_changes.some((c) => c.includes("الأخيرة")), `Missing last period rule: ${rSafaa1.applied_changes}`);
+
+  const rSafaa2 = await browserService.chatWithCopilot(
+    "قصر حضور صفاء على يوم الأربعاء بحد أقصى حصتين في الحصص الأخيرة",
+    school,
+    schedule,
+    "",
+    []
+  );
+  assert.equal(rSafaa2.should_solve, true);
+  assert.ok(rSafaa2.applied_changes.some((c) => c.includes("السبت") && c.includes("إجازة")), `A3 missing off days: ${rSafaa2.applied_changes}`);
+  assert.ok(rSafaa2.applied_changes.some((c) => c.includes("حد أقصى 2")), `A3 missing cap 2: ${rSafaa2.applied_changes}`);
+  passed("16c. Multi-phrasing compound rules (off-days + daily max + last slots)");
+
+  // 16d. Feminine HR negation ("اعفيها من الحصة الأولى والثانية") & grade early dismissal ("بيمشوا بدري")
+  const rNurse = await browserService.chatWithCopilot(
+    "مس شيماء عندها ساعة رضاعة: اعفيها من الحصة الأولى والثانية طول الأسبوع",
+    school,
+    schedule,
+    "",
+    []
+  );
+  assert.ok(rNurse.applied_changes.some((c) => c.includes("لا يعمل في الحصة الأولى")), `Nurse avoid 1 failed: ${rNurse.applied_changes}`);
+  assert.ok(rNurse.applied_changes.some((c) => c.includes("لا يعمل في الحصص 2")), `Nurse avoid 2 failed: ${rNurse.applied_changes}`);
+
+  const rEarlyGrade = await browserService.chatWithCopilot(
+    "أولى إعدادي يوم الخميس بيمشوا بدري بياخدوا 5 حصص بس",
+    school,
+    schedule,
+    "",
+    []
+  );
+  assert.ok(rEarlyGrade.applied_changes.some((c) => c.includes("تحديث حصص يوم (الخميس) إلى 5 حصص")), `Grade early failed: ${rEarlyGrade.applied_changes}`);
+  passed("16d. Feminine exemption negation ('اعفيها') & grade early-dismissal ('بيمشوا بدري')");
+
+  // 16e. Conversational Clarification Guard ("ثبّت حصة العربي" asks clarifying question instead of pinning 62 slots)
+  const rClarify = await browserService.chatWithCopilot("ثبّت حصة العربي", school, schedule, "", []);
+  assert.equal(rClarify.should_solve, false);
+  assert.equal(rClarify.applied_changes.length, 0);
+  assert.ok(rClarify.reply.includes("أي حصة أو فصل تقصد"), `Expected clarification ask: ${rClarify.reply}`);
+  passed("16e. Vague pin command triggers clarifying question rather than mass mutation");
+
+  // 16f. Feasibility What-If Consultation + Confirmation Follow-up + Teacher Recommendation + Compound Multi-Teacher
+  const rWhatIf = await browserService.chatWithCopilot(
+    "ينفع ندي أستاذ بدري إجازة يوم الخميس ولا هيحصل ضغط في حصصه؟",
+    school,
+    schedule,
+    "",
+    []
+  );
+  assert.equal(rWhatIf.should_solve, false);
+  assert.ok(rWhatIf.reply.includes("هل تحب أنفذ إجازة يوم الخميس"), `Expected what-if prompt: ${rWhatIf.reply}`);
+  const rConfirmWhatIf = await browserService.chatWithCopilot("أيوه نفذه", school, schedule, "", [
+    DEFAULT_CHAT_WELCOME_MESSAGE,
+    { role: "user", text: "ينفع ندي أستاذ بدري إجازة يوم الخميس ولا هيحصل ضغط في حصصه؟" },
+    { role: "ai", text: rWhatIf.reply },
+  ]);
+  assert.equal(rConfirmWhatIf.should_solve, true);
+  assert.ok(rConfirmWhatIf.applied_changes.some((c) => c.includes("بدري") && c.includes("الخميس")));
+
+  const rRec = await browserService.chatWithCopilot(
+    "عندي 3 حصص دين فاضيين لفصل 1/1، ترشحلي أديهم لمين من مدرسين المدرسة؟",
+    school,
+    schedule,
+    "",
+    []
+  );
+  assert.equal(rRec.should_solve, false);
+  assert.ok(rRec.reply.includes("أنسب المرشحين"), `Expected recommendations: ${rRec.reply}`);
+
+  const rMulti = await browserService.chatWithCopilot(
+    "خلي الحصة الأخيرة يوم الأحد لرفعت وبلاش لبدري وشيماء",
+    school,
+    schedule,
+    "",
+    []
+  );
+  assert.equal(rMulti.should_solve, true);
+  assert.ok(rMulti.applied_changes.some((c) => c.includes("رفعت") && c.includes("الحصة الأخيرة")));
+  assert.ok(rMulti.applied_changes.some((c) => c.includes("بدري") && c.includes("لا يعمل في الحصة الأخيرة")));
+  assert.ok(rMulti.applied_changes.some((c) => c.includes("شيماء") && c.includes("لا يعمل في الحصة الأخيرة")));
+  passed("16f. What-if advisor + affirmative confirm + recommendation + multi-teacher contrast");
+
   // -----------------------------------------------------------------------
   // Part B: Verify Live Server Endpoint Parity (http://localhost:3000)
   // -----------------------------------------------------------------------

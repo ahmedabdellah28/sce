@@ -284,17 +284,19 @@ function tokenize(clause: string): Item[] {
     if (
       [
         "لا", "ليس", "بدون", "مش", "غير", "معندوش", "معندهاش", "معندهمش", "معهوش",
-        "ممنوع", "ممنوعه", "عدم", "فاضيه", "فاضي", "معفي", "معفاه", "معفاة", "لن", "ما",
-        "بلاش", "مياخدش", "ماياخدش", "ماتديلوش", "ماتديهوش", "ماتعطيش", "ماياخذ", "ماياخذش",
-        "متاخدش", "ماتاخدش", "متاخذش", "ماتاخذش", "متديش", "ماتديش", "متديلوش", "متديهوش",
-        "منع", "امنع", "استبعاد", "مستبعد", "استثني", "مستثني", "استثناء", "استثن",
+        "ممنوع", "ممنوعه", "عدم", "فاضيه", "فاضي", "معفي", "معفاه", "معفاة", "معفيه", "معفيين",
+        "اعفيها", "اعفيه", "اعفيهم", "تعفي", "يعفي", "اعفاء", "اعف",
+        "لن", "ما", "بلاش", "مياخدش", "ماياخدش", "ماياخدوش", "متاخدش", "ماتاخدش", "متاخذش", "ماتاخذش",
+        "ماتديلوش", "ماتديهوش", "ماتديهاش", "ماتديلهاش", "ماتعطيش", "ماياخذ", "ماياخذش",
+        "متديش", "ماتديش", "متديلوش", "متديهوش", "متديهاش", "متديلهاش",
+        "منع", "امنع", "تمنع", "استبعاد", "مستبعد", "استثني", "مستثني", "استثناء", "استثن", "تستثني",
         "الغاء", "الغي", "الغ", "الغائ", "حذف", "احذف", "شيل", "شيله", "شيلله", "شل",
-        "ازل", "ازاله", "كنسل", "فرغ", "فرغله", "فرغلها", "تفريغ", "اعفاء", "اعف", "تجنب", "ملغي", "ملغاه",
-        "مبيجيش", "مايجيش", "مابيداومش", "مايداوم", "مابيجيش", "مايحضر", "مابيحضرش", "مابيشاركش"
+        "ازل", "ازاله", "كنسل", "فرغ", "فرغله", "فرغلها", "تفريغ", "تجنب", "تتجنب", "ملغي", "ملغاه", "ملغيه",
+        "مبيجيش", "مايجيش", "مبتجيش", "مابتجيش", "مابيداومش", "مبتداومش", "مابتداومش", "مايداوم", "مايحضر", "مابيحضرش", "مابيشاركش"
       ].includes(bare) ||
       bare.startsWith("ممنوع") ||
-      /^(?:شيل|فرغ|احذف|الغ)(?:ل|لي|له|لها|هم)$/.test(bare) ||
-      /^(ما|مش|مبي|مابي)(يجي|يداوم|يحضر|يجيش|يداومش|يحضرش|ياخدش|ياخذش)$/.test(bare)
+      /^(?:شيل|فرغ|احذف|الغ|اعف)(?:ل|لي|له|لها|هم|يها|يه|يهم)$/.test(bare) ||
+      /^(ما|مش|مبي|مابي|مبت|مابت)(يجي|يداوم|يحضر|يجيش|يداومش|تداومش|تجيش|يحضرش|ياخدش|تاخدش|ياخذش)$/.test(bare)
     ) {
       items.push({ k: "NEG" });
       continue;
@@ -434,10 +436,66 @@ function addRule(out: ParsedRuleText, r: CompactRule) {
 }
 
 function parseClauseInto(clause: string, allDays: number[], out: ParsedRuleText) {
-  const n = normAr(clause);
+  let effectiveClause = clause;
+  const nRaw = normAr(clause);
+
+  // Pre-extract daily MAX count caps ("متاخدش اكتر من حصتين", "بحد اقصى حصتين", "مينفعش تاخد غير حصتين")
+  // and strip the cap phrase so "حصتين" doesn't collide with placement NEG rules!
+  const capRx = /(?:^|\s)(?:و\s*)?(?:ما\s*تاخدش|متاخدش|ما\s*ياخدش|مياخدش|مينفعش\s*تاخد\s*غير|مينفعش\s*ياخد\s*غير|لا\s*(?:تزيد|يزيد)\s*عن|بحد\s*اقصي|كحد\s*اقصي|حد\s*اقصي)\s*(?:اكتر\s*من|اكثر\s*من)?\s*(\d+|حصه\s*واحده|حصه|حصتين|حصتان|ثلاث\s*حصص|تلات\s*حصص|اربع\s*حصص|خمس\s*حصص|ست\s*حصص)(?=\s|$)/g;
+  const capMatches = [...nRaw.matchAll(capRx)];
+  if (capMatches.length > 0) {
+    const capWordMap: Record<string, number> = {
+      حصه: 1, "حصه واحده": 1, حصتين: 2, حصتان: 2,
+      "ثلاث حصص": 3, "تلات حصص": 3, "اربع حصص": 4, "خمس حصص": 5, "ست حصص": 6,
+    };
+    const clauseDays = parseDaysList(clause);
+    for (const cm of capMatches) {
+      const rawCount = cm[1].trim();
+      const count = /^\d+$/.test(rawCount) ? Number(rawCount) : (capWordMap[rawCount] ?? null);
+      if (count !== null && count >= 1) {
+        const targetCapDays = clauseDays.length > 0 ? clauseDays : allDays;
+        for (const d of targetCapDays) {
+          if (!out.day_counts.some((dc) => dc.day === d && dc.type === "MAX")) {
+            out.day_counts.push({ day: d, count, type: "MAX" });
+          }
+        }
+        out.understood = true;
+      }
+    }
+    effectiveClause = normAr(clause).replace(capRx, " ").replace(/\s+/g, " ").trim();
+  }
+
+  // Pre-extract attendance restriction ("مبتداومش غير يوم الأربعاء بس" / "تيجي الأربعاء بس" / "قصر حضور على الأربعاء")
+  const restrictedOnlyMatch = nRaw.match(
+    /(?:(?:مبتداومش|مابتداومش|ما\s*بتداومش|لا\s*(?:يعمل|تعمل|يداوم|تداوم|يحضر|تحضر))\s*(?:غير|الا|سوي)\s*|(?:قصر|اقتصر)\s*(?:حضور|دوام|عمل)[^،.]*?علي\s*|(?:تيجي|يجي|تداوم|يداوم|تحضر|يحضر)\s+(?:في\s+)?)(?:يوم\s+)?(?:ال)?(?:سبت|احد|اثنين|اتنين|ثلاثاء|تلات|اربعاء|اربع|خميس)(?:\s*(?:،|و)\s*(?:ال)?(?:سبت|احد|اثنين|اتنين|ثلاثاء|تلات|اربعاء|اربع|خميس))*(?:\s+(?:بس|فقط))?/
+  );
+  const restrictedExplicit = restrictedOnlyMatch
+    ? /(?:^|\s)(?:غير|الا|سوي|علي|بس|فقط)(?=\s|$)/.test(restrictedOnlyMatch[0]) &&
+      !/(?:^|\s)(?:ما|مش|لا)\s+(?:تيجي|يجي|تداوم|يداوم|تحضر|يحضر)(?=\s|$)/.test(nRaw)
+    : false;
+  if (restrictedOnlyMatch && restrictedExplicit) {
+    const allowedFromFrag = parseDaysList(restrictedOnlyMatch[0]);
+    const allowedDays = allowedFromFrag;
+    if (allowedDays.length > 0 && allowedDays.length < allDays.length) {
+      for (const d of allDays) {
+        if (!allowedDays.includes(d) && !out.off_days.includes(d)) {
+          out.off_days.push(d);
+        }
+      }
+      out.work_days = [...allowedDays];
+      out.understood = true;
+      effectiveClause = effectiveClause
+        .replace(restrictedOnlyMatch[0], " ")
+        .replace(/(?:يعني\s*)?(?:باقي|بقيه)\s*(?:الاسبوع|الايام)\s*اجازه/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  }
+
+  const n = normAr(effectiveClause);
   const soft = SOFT_WORDS.test(n);
   const hard = !soft;
-  const items = tokenize(clause);
+  const items = tokenize(effectiveClause);
   if (items.length === 0) return;
 
   // ---- limits / policies phrased explicitly ----
@@ -616,7 +674,14 @@ function parseClauseInto(clause: string, allDays: number[], out: ParsedRuleText)
 
   const w = soft ? 9 : 10;
   const push = (days: number[], base: Omit<CompactRule, "day">) => {
-    const targetDays = days.length > 0 ? days : (dayItems.length > 0 ? dayItems.map((d) => d.d) : []);
+    const targetDays =
+      days.length > 0
+        ? days
+        : dayItems.length > 0
+          ? dayItems.map((d) => d.d)
+          : out.work_days && out.work_days.length > 0
+            ? out.work_days
+            : [];
     if (targetDays.length === 0) addRule(out, { ...base, day: null });
     else for (const d of targetDays) addRule(out, { ...base, day: d });
   };
@@ -647,6 +712,8 @@ function parseClauseInto(clause: string, allDays: number[], out: ParsedRuleText)
           neg.push("LAST");
         } else if (x.k === "NUM") {
           neg.push(x.n);
+        } else if (x.k === "OTHER" && /^(?:يبقوا|ويبقوا|يكونوا|ويكونوا|ويكون|وتكون|لكن|غير|اكتر|اكثر|غيرهم)$/.test(x.t)) {
+          break;
         } else if (x.k === "WORK" || x.k === "SLOT" || x.k === "DAYS" || x.k === "AND" || x.k === "OTHER" || x.k === "FROM") {
           if (x.k === "WORK") sawWorkOnly = true;
         } else if (x.k === "DAY") {

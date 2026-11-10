@@ -41,6 +41,7 @@ import {
   tryExecuteExtendedAgentAction,
   buildLiveAgentContextDigest,
   sanitizePlacementRuleConflicts,
+  executeGeminiParsedResponse,
 } from "./services/agentMemoryEngine.ts";
 
 const PORT = 3000;
@@ -74,11 +75,11 @@ const geminiApiKey = SERVER_GEMINI_KEYS[0] || "";
 
 function sanitizeGeminiModel(m?: string): string {
   const model = (m || "").trim();
-  if (!model || model === "gemini-flash-latest" || model === "gemini-1.5-flash" || model === "gemini-2.0-flash" || model === "gemini-3.8-flash") {
-    return "gemini-2.5-flash";
+  if (!model || model === "gemini-flash-latest" || model === "gemini-1.5-flash" || model === "gemini-2.0-flash" || model === "gemini-2.5-flash") {
+    return "gemini-3.8-flash";
   }
-  if (model === "gemini-flash-lite-latest" || model === "gemini-flash-lite" || model === "gemini-3.1-flash-lite") {
-    return "gemini-2.5-flash-lite";
+  if (model === "gemini-flash-lite-latest" || model === "gemini-flash-lite" || model === "gemini-3.1-flash-lite" || model === "gemini-2.5-flash-lite") {
+    return "gemini-3.5-flash-lite";
   }
   return model;
 }
@@ -86,8 +87,8 @@ function sanitizeGeminiModel(m?: string): string {
 const geminiModel = sanitizeGeminiModel(process.env.GEMINI_MODEL);
 const CANDIDATE_GEMINI_MODELS = [
   geminiModel,
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.5-flash-lite", "gemini-2.5-flash",
 ].filter((m, i, arr) => arr.indexOf(m) === i);
 
 function createServerGeminiClient(key: string) {
@@ -295,7 +296,8 @@ app.post("/api/ai/parse", async (req: Request, res: Response) => {
         }
       );
       const rawTextResponse = response.text || "";
-      const jsonMatch = rawTextResponse.match(/\{[\s\S]*\}/);
+      const cleanedJson = rawTextResponse.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      const jsonMatch = cleanedJson.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const candidate = normalizeAiExtractedSchoolJson(JSON.parse(jsonMatch[0]));
         const validation = validateSchoolDataSchema(candidate);
@@ -563,21 +565,23 @@ ${effectiveMessage}`,
           },
         ],
       });
-      const { response } = await generateGeminiContentWithFallback(geminiContents);
+      const { response } = await generateGeminiContentWithFallback(geminiContents, { responseMimeType: "application/json", maxOutputTokens: 8192 });
       const rawTextResponse = response.text || "";
-      const jsonMatch = rawTextResponse.match(/\{[\s\S]*\}/);
+      const cleanedJson = rawTextResponse.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      const jsonMatch = cleanedJson.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.reply) {
-          const isMutation = parsed.should_solve === true && parsed.updated_school;
+        let parsed: any = null;
+        try { parsed = JSON.parse(jsonMatch[0]); } catch { const rm = jsonMatch[0].match(/"reply"\s*:\s*"([\s\S]*?)"(?:\s*,|\s*\})/); if (rm?.[1]) parsed = { reply: rm[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'), should_solve: false }; }
+        if (parsed && (parsed.reply || (Array.isArray(parsed.ops) && parsed.ops.length > 0))) {
+          const execRes = executeGeminiParsedResponse(school, currentMarkdown, parsed, validateSchoolDataSchema);
           return res.json({
             understood: true,
-            reply: parsed.reply,
-            updated_markdown: isMutation ? (parsed.updated_markdown || currentMarkdown) : currentMarkdown,
-            updated_school: isMutation ? parsed.updated_school : school,
-            should_solve: Boolean(isMutation),
-            applied_changes: isMutation ? (parsed.applied_changes || ["تعديل بواسطة الذكاء الاصطناعي"]) : [],
-            analysis: InBrowserSchoolEngine.analyzeSchool(isMutation ? parsed.updated_school : school),
+            reply: execRes.reply,
+            updated_markdown: execRes.updated_markdown,
+            updated_school: execRes.updated_school,
+            should_solve: execRes.should_solve,
+            applied_changes: execRes.applied_changes,
+            analysis: InBrowserSchoolEngine.analyzeSchool(execRes.updated_school),
           });
         }
       } else if (rawTextResponse.trim()) {
