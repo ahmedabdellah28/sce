@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import type { SchoolData } from "../types.ts";
 import { HybridSchoolService } from "../services/geminiService.ts";
 import { ApiKeyManager } from "../services/apiKeyManager.ts";
 import { getBuiltInSchool376, InBrowserSchoolEngine } from "../services/localEngine.ts";
@@ -147,6 +148,51 @@ async function runHumanFirstTimeSimulation() {
   );
   passed("16. Contextual undo reverts Thursday off-day cleanly");
 
+  // 16b. Browser-only regression check: "الغاء الحصة الاولى يوم الاحد" -> AVOID_FIRST & sanitized stale FIRST_N
+  const badriPre = school.teachers.find((t) => t.name.includes("بدري"))!;
+  const schoolWithStaleFirst: SchoolData = {
+    ...school,
+    teachers: school.teachers.map((t) =>
+      t.id === badriPre.id
+        ? {
+            ...t,
+            work_pattern: {
+              day_rules: t.work_pattern?.day_rules || {},
+              daily_period_rules: t.work_pattern?.daily_period_rules || [],
+              placement_rules: [{ day: 0, placement_type: "FIRST_N", n_periods: 1, exact_periods: [], is_hard: true, weight: 10 }],
+            },
+          }
+        : t
+    ),
+  };
+  const cancelLocal = await browserService.chatWithCopilot(
+    `${badriPre.name} الغاء الحصة الاولى يوم الاحد`,
+    schoolWithStaleFirst,
+    schedule,
+    "",
+    []
+  );
+  assert.ok(
+    cancelLocal.reply.includes("لا يعمل في الحصة الأولى") && !cancelLocal.reply.includes("أول 1 حصص"),
+    `Cancel period 1 misparsed: ${cancelLocal.reply}`
+  );
+  const updatedBadri = cancelLocal.updated_school.teachers.find((t) => t.id === badriPre.id)!;
+  const rulesAfterCancel = updatedBadri.work_pattern?.placement_rules || [];
+  assert.ok(
+    rulesAfterCancel.some((r) => r.day === 0 && r.placement_type === "AVOID_FIRST"),
+    `Expected AVOID_FIRST on Sunday: ${JSON.stringify(rulesAfterCancel)}`
+  );
+  assert.ok(
+    !rulesAfterCancel.some((r) => r.day === 0 && r.placement_type === "FIRST_N"),
+    `Contradictory FIRST_N was not sanitized: ${JSON.stringify(rulesAfterCancel)}`
+  );
+  const solvedAfterCancel = InBrowserSchoolEngine.solveInBrowser(cancelLocal.updated_school);
+  assert.ok(
+    !solvedAfterCancel.schedule.entries.some((e) => e.teacher_id === badriPre.id && e.day === 0 && e.period === 1),
+    "Teacher still got Sunday Period 1 after AVOID_FIRST!"
+  );
+  passed("16b. Browser cancellation phrasing ('الغاء الحصة الاولى يوم الاحد') -> AVOID_FIRST & sanitized stale FIRST_N");
+
   // -----------------------------------------------------------------------
   // Part B: Verify Live Server Endpoint Parity (http://localhost:3000)
   // -----------------------------------------------------------------------
@@ -177,6 +223,23 @@ async function runHumanFirstTimeSimulation() {
     assert.equal(data.understood, true);
     assert.ok(data.reply.includes("بدري"), `Server follow-up failed: ${data.reply}`);
     passed("17. Live Express server /api/ai/chat multi-turn pronoun follow-up parity");
+
+    const cancelPeriodRes = await fetch("http://localhost:3000/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        school: schoolWithStaleFirst,
+        schedule,
+        message: `${badriPre.name} الغاء الحصة الاولى يوم الاحد`,
+      }),
+    });
+    assert.equal(cancelPeriodRes.status, 200);
+    const cancelData = await cancelPeriodRes.json();
+    assert.ok(
+      cancelData.reply.includes("لا يعمل في الحصة الأولى") && !cancelData.reply.includes("أول 1 حصص"),
+      `Server cancel period 1 misparsed: ${cancelData.reply}`
+    );
+    passed("18. Live Express server /api/ai/chat cancellation phrasing -> AVOID_FIRST");
   } else {
     console.log("ℹ️ Live server not active on port 3000; skipping HTTP check.");
   }

@@ -286,11 +286,15 @@ function tokenize(clause: string): Item[] {
         "لا", "ليس", "بدون", "مش", "غير", "معندوش", "معندهاش", "معندهمش", "معهوش",
         "ممنوع", "ممنوعه", "عدم", "فاضيه", "فاضي", "معفي", "معفاه", "معفاة", "لن", "ما",
         "بلاش", "مياخدش", "ماياخدش", "ماتديلوش", "ماتديهوش", "ماتعطيش", "ماياخذ", "ماياخذش",
-        "منع", "امنع", "استبعاد", "مستبعد", "استثني", "مستثنى",
+        "متاخدش", "ماتاخدش", "متاخذش", "ماتاخذش", "متديش", "ماتديش", "متديلوش", "متديهوش",
+        "منع", "امنع", "استبعاد", "مستبعد", "استثني", "مستثني", "استثناء", "استثن",
+        "الغاء", "الغي", "الغ", "الغائ", "حذف", "احذف", "شيل", "شيله", "شيلله", "شل",
+        "ازل", "ازاله", "كنسل", "فرغ", "فرغله", "فرغلها", "تفريغ", "اعفاء", "اعف", "تجنب", "ملغي", "ملغاه",
         "مبيجيش", "مايجيش", "مابيداومش", "مايداوم", "مابيجيش", "مايحضر", "مابيحضرش", "مابيشاركش"
       ].includes(bare) ||
       bare.startsWith("ممنوع") ||
-      /^(ما|مش|مبي|مابي)(يجي|يداوم|يحضر|يجيش|يداومش|يحضرش)$/.test(bare)
+      /^(?:شيل|فرغ|احذف|الغ)(?:ل|لي|له|لها|هم)$/.test(bare) ||
+      /^(ما|مش|مبي|مابي)(يجي|يداوم|يحضر|يجيش|يداومش|يحضرش|ياخدش|ياخذش)$/.test(bare)
     ) {
       items.push({ k: "NEG" });
       continue;
@@ -629,7 +633,7 @@ function parseClauseInto(clause: string, allDays: number[], out: ParsedRuleText)
       let j = i + 1;
       const neg: Array<"FIRST" | "LAST" | number> = [];
       let sawWorkOnly = false;
-      const lim = Math.min(items.length, i + 10);
+      const lim = Math.min(items.length, i + 16);
       for (; j < lim; j++) {
         const x = items[j];
         if (x.k === "ORD" && items[j + 1]?.k === "FIRST") {
@@ -643,7 +647,7 @@ function parseClauseInto(clause: string, allDays: number[], out: ParsedRuleText)
           neg.push("LAST");
         } else if (x.k === "NUM") {
           neg.push(x.n);
-        } else if (x.k === "WORK" || x.k === "SLOT" || x.k === "AND" || x.k === "OTHER" || x.k === "FROM") {
+        } else if (x.k === "WORK" || x.k === "SLOT" || x.k === "DAYS" || x.k === "AND" || x.k === "OTHER" || x.k === "FROM") {
           if (x.k === "WORK") sawWorkOnly = true;
         } else if (x.k === "DAY") {
           pending.push(x.d);

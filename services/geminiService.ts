@@ -40,6 +40,7 @@ import {
   enrichMessageWithMemoryContext,
   tryExecuteExtendedAgentAction,
   buildLiveAgentContextDigest,
+  sanitizePlacementRuleConflicts,
   type AgentUiActionType,
 } from "./agentMemoryEngine.ts";
 
@@ -653,7 +654,7 @@ export class HybridSchoolService {
           reply = `تم استلام طلبك لإنشاء وتوزيع الجدول المدرسي. جاري حل وتوليد الجدول الآن بأعلى دقة رياضية ومؤشر جودة مرتفع.`;
         } else if (cmd.ops.length > 0) {
           const resOps = applyOps(school, cmd.ops);
-          updatedSchool = resOps.school;
+          updatedSchool = sanitizePlacementRuleConflicts(resOps.school, cmd.ops);
           appliedChanges = resOps.changes;
           updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
           reply =

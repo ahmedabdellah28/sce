@@ -8,8 +8,9 @@ import type {
   Grade,
 } from "../types.ts";
 import { DAY_NAMES_AR } from "../types.ts";
-import { normAr, parseDaysList } from "./arabicRules.ts";
+import { normAr, parseDaysList, parseRuleText } from "./arabicRules.ts";
 import {
+  applyOps,
   findTeachersInMessage,
   resolveTeacherFromMessage,
   findSubjectInMessage,
@@ -768,7 +769,171 @@ export function tryExecuteExtendedAgentAction(
     }
   }
 
+  // 8. Clear explicit teacher placement constraint ("الغي قيود الأستاذ فلان" / "امسح قيد يوم الاحد لفلان")
+  if (/(?:الغ|الغاء|الغي|احذف|حذف|امسح|ازل|شيل).*(?:قيد|قيود)/.test(n)) {
+    const tMatches = findTeachersInMessage(school, message);
+    if (tMatches.length === 1) {
+      const target = tMatches[0];
+      const dayMatches = parseDaysList(message.replace(target.name, " "));
+      const existingRules = target.work_pattern?.placement_rules || [];
+      if (existingRules.length > 0) {
+        const nextRules =
+          dayMatches.length > 0
+            ? existingRules.filter((r) => r.day === null || r.day === undefined || !dayMatches.includes(Number(r.day)))
+            : [];
+        const removedCount = existingRules.length - nextRules.length;
+        if (removedCount > 0) {
+          const updatedSchool: SchoolData = {
+            ...school,
+            teachers: school.teachers.map((t) =>
+              t.id === target.id && t.work_pattern
+                ? { ...t, work_pattern: { ...t.work_pattern, placement_rules: nextRules } }
+                : t
+            ),
+          };
+          const scopeLabel = dayMatches.length > 0 ? dayMatches.map((d) => DAY_NAMES_AR[d] || d).join(" و") : "جميع الأيام";
+          const change = `حذف ${removedCount} قيد/قيود حصص للمعلم ${target.name} (${scopeLabel})`;
+          return {
+            handled: true,
+            reply: `✓ تم ${change}، وجاري إعادة بناء الجدول تلقائياً.`,
+            updated_school: updatedSchool,
+            updated_markdown: generateSchoolMarkdown(updatedSchool, [change]),
+            should_solve: true,
+            applied_changes: [change],
+          };
+        }
+      }
+    }
+  }
+
+  // 9. Explicit period cancellation / exclusion ("ممدوح كساب الغاء الحصة الاولى يوم الاحد" / "بلاش الحصص الاولى")
+  // Intercepts before legacy schoolCore heuristics (e.g. teacher named "بدري" matching "يمشي بدري" or plural "الحصص الاولى")
+  const hasCancelOrNegVerb =
+    /(?:^|\s)(?:الغاء|الغي|الغ|احذف|حذف|شيل|شيله|شيلله|شل|ازل|ازاله|كنسل|فرغ|فرغله|فرغلها|تجنب|بلاش|ممنوع|بدون|معندوش|معندهاش|معفي|معفاه|لا|متديش|ماتديش|ماتديلوش|مياخدش|ماياخدش|متاخدش|ماتاخدش)(?:\s|$)/.test(
+      n
+    );
+  const hasOffKeyword = /(?:اجاز[ةهت]|اوف|أوف|تفرغ|راح[ةه])/.test(n);
+  const hasExplicitPeriodSlot =
+    /(?:الحص[ةه]\s*(?:ال)?(?:اول[يى]|ثاني[ةه]|تاني[ةه]|ثالث[ةه]|تالت[ةه]|رابع[ةه]|خامس[ةه]|سادس[ةه]|سابع[ةه]|ثامن[ةه]|تامن[ةه]|اخير[ةه]|\d{1,2})|(?:اول[يى]|اخير[ةه])\s*(?:حص[ةه]|حصص|حصتين)|(?:ال)?حصص\s*(?:ال)?(?:اول[يى]|اخير[ةه]))/.test(
+      n
+    );
+  if (hasCancelOrNegVerb && !hasOffKeyword && hasExplicitPeriodSlot && !/\d+\s*[\/\\]\s*\d+/.test(n)) {
+    const tMatches = findTeachersInMessage(school, message);
+    const targetTeacher = tMatches.length === 1 ? tMatches[0] : resolveTeacherFromMessage(school, message).teacher;
+    if (targetTeacher) {
+      const strippedBody = message
+        .replace(new RegExp(targetTeacher.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), " ")
+        .trim();
+      const parsed = parseRuleText(strippedBody, getOrderedSchoolDays(school));
+      if (parsed.rules.length > 0) {
+        const ops = parsed.rules.map((r) => ({
+          op: "add_placement_rule" as const,
+          teacher: targetTeacher.name,
+          day: r.day,
+          type: r.type,
+          n: r.n,
+          periods: r.periods,
+          hard: r.hard,
+        }));
+        const resOps = applyOps(school, ops);
+        if (resOps.changed || resOps.changes.length > 0) {
+          const cleanSchool = sanitizePlacementRuleConflicts(resOps.school, ops);
+          const appliedChanges = resOps.changes;
+          return {
+            handled: true,
+            reply:
+              `✓ تم تنفيذ التعديل المطلوب بنجاح وتحديث وثيقة المدرسة (.md):\n` +
+              appliedChanges.map((c) => `✓ ${c}`).join("\n") +
+              `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`,
+            updated_school: cleanSchool,
+            updated_markdown: generateSchoolMarkdown(cleanSchool, appliedChanges),
+            should_solve: true,
+            applied_changes: appliedChanges,
+          };
+        }
+      }
+    }
+  }
+
   return null;
+}
+
+/**
+ * Removes contradictory placement_rules on the same teacher & day when a newly
+ * applied rule overrides the opposite polarity (e.g., AVOID_FIRST vs FIRST_N).
+ */
+export function sanitizePlacementRuleConflicts(
+  school: SchoolData,
+  ops: ReadonlyArray<{ op?: string; teacher?: string; type?: string; day?: number | number[] | null; periods?: unknown }>
+): SchoolData {
+  const placementOps = (ops || []).filter((o) => o?.op === "add_placement_rule" && o.teacher && o.type);
+  if (placementOps.length === 0) return school;
+
+  return {
+    ...school,
+    teachers: school.teachers.map((teacher) => {
+      if (!teacher.work_pattern?.placement_rules?.length) return teacher;
+      let rules = [...teacher.work_pattern.placement_rules];
+      let modified = false;
+
+      for (const op of placementOps) {
+        if (normAr(teacher.name) !== normAr(op.teacher || "")) continue;
+        const opDays: Array<number | null> =
+          op.day === undefined || op.day === null
+            ? [null]
+            : Array.isArray(op.day)
+              ? op.day.map(Number)
+              : [Number(op.day)];
+
+        const sameDay = (rDay: number | null | undefined, d: number | null) =>
+          d === null ? true : (rDay ?? null) === d;
+
+        for (const d of opDays) {
+          if (op.type === "AVOID_FIRST") {
+            const before = rules.length;
+            rules = rules.filter((r) => !(sameDay(r.day, d) && r.placement_type === "FIRST_N"));
+            if (rules.length !== before) modified = true;
+          } else if (op.type === "FIRST_N") {
+            const before = rules.length;
+            rules = rules.filter((r) => !(sameDay(r.day, d) && r.placement_type === "AVOID_FIRST"));
+            if (rules.length !== before) modified = true;
+          } else if (op.type === "AVOID_LAST") {
+            const before = rules.length;
+            rules = rules.filter((r) => !(sameDay(r.day, d) && r.placement_type === "LAST_N"));
+            if (rules.length !== before) modified = true;
+          } else if (op.type === "LAST_N") {
+            const before = rules.length;
+            rules = rules.filter((r) => !(sameDay(r.day, d) && r.placement_type === "AVOID_LAST"));
+            if (rules.length !== before) modified = true;
+          } else if (op.type === "AVOID_PERIODS" && Array.isArray(op.periods) && op.periods.length > 0) {
+            const blocked = new Set((op.periods as unknown[]).map(Number));
+            rules = rules.flatMap((r) => {
+              if (!sameDay(r.day, d)) return [r];
+              if (r.placement_type === "EXACT_PERIODS" && Array.isArray(r.exact_periods)) {
+                const kept = r.exact_periods.filter((p) => !blocked.has(p));
+                if (kept.length !== r.exact_periods.length) modified = true;
+                return kept.length > 0 ? [{ ...r, exact_periods: kept }] : [];
+              }
+              if (r.placement_type === "FIRST_N" && (r.n_periods ?? 1) === 1 && blocked.has(1)) {
+                modified = true;
+                return [];
+              }
+              return [r];
+            });
+          }
+        }
+      }
+
+      if (!modified) return teacher;
+      return {
+        ...teacher,
+        work_pattern: {
+          ...teacher.work_pattern,
+          placement_rules: rules,
+        },
+      };
+    }),
+  };
 }
 
 /**
