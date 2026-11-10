@@ -3468,7 +3468,7 @@ export default function App() {
       </div>
 
       {/* Executive Footer: Copyright & Creator Contact */}
-      <footer className="max-w-[1850px] mx-auto px-4 sm:px-6 pb-4 pt-1">
+      <footer className="max-w-[1850px] mx-auto px-4 sm:px-6 pb-20 lg:pb-4 pt-1">
         <div className="bg-[#FFFFFF] border border-[#E7E5E4] rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[#57534E]">
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -3498,20 +3498,36 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Non-intrusive Mobile Chat Bottom Trigger & Solid WCAG AA Slide-up Sheet (< lg only) */}
-      <div className="lg:hidden sticky bottom-0 z-30 bg-[#FFFFFF] border-t border-[#E7E5E4] p-2.5 shadow-lg">
-        <button
-          type="button"
-          onClick={() => setIsMobileSheetOpen(true)}
-          className="w-full min-h-[44px] bg-[#0F766E] hover:bg-[#115E59] text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center justify-between shadow-sm transition cursor-pointer"
-        >
-          <span className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-lg bg-[#EDE9FE] text-[#8B5CF6] flex items-center justify-center text-xs" aria-hidden="true">✦</span>
-            <span>وكيل الجداول الذكي (طلب تعديل بالعامية)</span>
-          </span>
-          <span className="text-[11px] bg-[#CCFBF1] text-[#0F766E] px-2 py-0.5 rounded-md font-black">فتح المحادثة</span>
-        </button>
-      </div>
+      {/* Sleek Floating Mobile AI Assistant Pill (< lg only) */}
+      {!isMobileSheetOpen && (
+        <div className="lg:hidden fixed bottom-4 end-4 z-40">
+          <button
+            type="button"
+            onClick={() => setIsMobileSheetOpen(true)}
+            aria-label="وكيل الجداول الذكي (طلب تعديل بالعامية)"
+            title="وكيل الجداول الذكي (طلب تعديل بالعامية)"
+            className="group min-h-[46px] h-12 ps-2 pe-3.5 rounded-full bg-[#1C1917] hover:bg-[#292524] active:scale-95 text-white border border-white/15 shadow-[0_12px_28px_-6px_rgba(28,25,23,0.45),0_4px_12px_rgba(15,118,110,0.28)] flex items-center gap-2.5 transition-all duration-200 cursor-pointer"
+          >
+            <span className="relative w-8 h-8 rounded-full bg-gradient-to-br from-[#0F766E] via-[#0D9488] to-[#6D28D9] flex items-center justify-center shrink-0 ring-1 ring-white/25" aria-hidden="true">
+              <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11 2L13.09 8.26L19 10.5L13.09 12.74L11 19L8.91 12.74L3 10.5L8.91 8.26L11 2ZM19 14L20.05 16.95L23 18L20.05 19.05L19 22L17.95 19.05L15 18L17.95 16.95L19 14Z" />
+              </svg>
+              <span
+                className={`absolute -top-0.5 -end-0.5 w-2.5 h-2.5 rounded-full bg-[#10B981] ring-2 ring-[#1C1917] ${isChatSubmitting ? "animate-pulse" : ""}`}
+              />
+            </span>
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="text-[13px] font-extrabold tracking-tight text-white">المساعد الذكي</span>
+              <span
+                dir="ltr"
+                className="text-[10px] font-black tracking-wider px-1.5 py-0.5 rounded-full bg-[#EDE9FE] text-[#5B21B6] leading-none"
+              >
+                AI
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
 
       {isMobileSheetOpen && (
         <div
