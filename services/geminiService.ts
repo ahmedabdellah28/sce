@@ -180,6 +180,7 @@ export function reconcileAiWithDeterministicSchool(
   const missingSubjectsOrTeachers =
     detSchool.subjects.length > aiSchool.subjects.length ||
     detSchool.teachers.length > aiSchool.teachers.length ||
+    detSchool.days.length > aiSchool.days.length ||
     detTotalPeriods > aiTotalPeriods ||
     detOffCount > aiOffCount ||
     (detHasDeficitMarkers && !aiHasDeficitMarkers);
@@ -307,7 +308,7 @@ export class HybridSchoolService {
       const res = await fetch(`${this.backendUrl}/api/presets/${presetId}`, {
         headers: this.getHeaders(),
       });
-      if (res.ok) return await res.json();
+      if (res.ok && res.headers.get("content-type")?.includes("application/json")) return await res.json();
     } catch {
       // Fallback
     }
@@ -354,7 +355,7 @@ export class HybridSchoolService {
         headers: this.getHeaders(),
         body: JSON.stringify({ text }),
       });
-      if (res.ok) {
+      if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
         const data = await res.json();
         if (!data.needs_client_ai) {
           return data;
@@ -489,7 +490,7 @@ export class HybridSchoolService {
         headers: this.getHeaders(),
         body: JSON.stringify({ school, schedule: schedule || null }),
       });
-      if (res.ok) return await res.json();
+      if (res.ok && res.headers.get("content-type")?.includes("application/json")) return await res.json();
     } catch {
       // Local fallback
     }
@@ -537,7 +538,7 @@ export class HybridSchoolService {
           history: history || [],
         }),
       });
-      if (res.ok) {
+      if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
         const data = await res.json();
         if (data.understood) {
           return data;
@@ -547,6 +548,7 @@ export class HybridSchoolService {
       // Continue to in-browser deterministic interpreter
     }
 
+    const currentMarkdown = markdown || NESSCHINFO_RAW_TEXT;
     // 2. In-browser deterministic command interpreter (for mutations/commands)
     const isQuery = isQuestionOrInquiry(message);
     if (!isQuery) {
@@ -606,10 +608,38 @@ export class HybridSchoolService {
           analysis: InBrowserSchoolEngine.analyzeSchool(updatedSchool),
         };
       }
+
+      // Also support pasting full unstructured Arabic school prose directly into chat in browser-only mode
+      if (message.trim().length >= 120) {
+        const unstructured = parseUnstructuredArabicSchoolText(message);
+        if (unstructured) {
+          return {
+            reply: `✓ ${unstructured.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
+            updated_markdown: generateSchoolMarkdown(unstructured.school, unstructured.notes),
+            updated_school: unstructured.school,
+            should_solve: true,
+            applied_changes: unstructured.notes,
+            analysis: InBrowserSchoolEngine.analyzeSchool(unstructured.school),
+          };
+        }
+      }
     }
 
-    // 3. Open-ended request -> Try Client-Side BYOK Gemini with Key Rotation & Schema Validation
-    const currentMarkdown = markdown || NESSCHINFO_RAW_TEXT;
+    // 3. Deterministic Local School Q&A Assistant FIRST (exact quotas, off-days, vacancies, schedules, audit)
+    const preAnalysis = InBrowserSchoolEngine.analyzeSchool(school);
+    const localAns = answerSchoolQuestion(message, school, schedule, preAnalysis, history);
+    if (localAns.answered) {
+      return {
+        reply: localAns.reply,
+        updated_markdown: currentMarkdown,
+        updated_school: school,
+        should_solve: false,
+        applied_changes: [],
+        analysis: preAnalysis,
+      };
+    }
+
+    // 4. Open-ended conversational request or novel mutation -> Client-Side BYOK Gemini with Schema Validation
     let fallbackNotice = "";
 
     const hasKeys = ApiKeyManager.getKeys().length > 0;
@@ -670,7 +700,8 @@ ${message}
           { onNotice: this.onKeyNotice }
         );
 
-        const parsed = JSON.parse(rawText);
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
         const noticePrefix = notices.length > 0 ? `${notices.join("\n")}\n\n` : "";
 
         if (parsed.reply) {
@@ -722,25 +753,7 @@ ${message}
         "\n💡 ملاحظة: جميع مفاتيح Gemini المضافة معطّلة حالياً؛ يعمل النظام عبر المحرك المحلي.";
     }
 
-    // 4. Seamless Deterministic Local Fallback (Always answers questions with full data access)
-    const localAns = answerSchoolQuestion(
-      message,
-      school,
-      schedule,
-      InBrowserSchoolEngine.analyzeSchool(school),
-      history
-    );
-
-    if (localAns.answered) {
-      return {
-        reply: localAns.reply + fallbackNotice,
-        updated_markdown: currentMarkdown,
-        updated_school: school,
-        should_solve: false,
-        applied_changes: [],
-        analysis: InBrowserSchoolEngine.analyzeSchool(school),
-      };
-    }
+    // 5. Fallback summary if no BYOK key or Gemini call could not answer
 
     return {
       reply:
@@ -774,7 +787,7 @@ ${message}
         const { result: session } = await ApiKeyManager.executeWithRotation(
           async (client) => {
             return await client.live.connect({
-              model: "gemini-3.8-live",
+              model: "gemini-2.5-flash-native-audio-preview-09-2025",
               config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: {

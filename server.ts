@@ -68,11 +68,11 @@ const geminiApiKey = SERVER_GEMINI_KEYS[0] || "";
 
 function sanitizeGeminiModel(m?: string): string {
   const model = (m || "").trim();
-  if (!model || model === "gemini-flash-lite-latest" || model === "gemini-flash-lite") {
-    return "gemini-3.1-flash-lite";
+  if (!model || model === "gemini-flash-latest" || model === "gemini-1.5-flash" || model === "gemini-2.0-flash" || model === "gemini-3.8-flash") {
+    return "gemini-2.5-flash";
   }
-  if (model === "gemini-flash-latest" || model === "gemini-2.5-flash" || model === "gemini-1.5-flash" || model === "gemini-2.0-flash") {
-    return "gemini-3.8-flash";
+  if (model === "gemini-flash-lite-latest" || model === "gemini-flash-lite" || model === "gemini-3.1-flash-lite") {
+    return "gemini-2.5-flash-lite";
   }
   return model;
 }
@@ -80,7 +80,8 @@ function sanitizeGeminiModel(m?: string): string {
 const geminiModel = sanitizeGeminiModel(process.env.GEMINI_MODEL);
 const CANDIDATE_GEMINI_MODELS = [
   geminiModel,
-  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
 ].filter((m, i, arr) => arr.indexOf(m) === i);
 
 function createServerGeminiClient(key: string) {
@@ -473,7 +474,28 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
     }
   }
 
-  // Conversational response via Server-Side Gemini (when configured)
+  // 1. High-intelligence Deterministic Local School Q&A Assistant FIRST (100% exact school math & facts)
+  const localAns = answerSchoolQuestion(
+    effectiveMessage,
+    school,
+    schedule,
+    InBrowserSchoolEngine.analyzeSchool(school),
+    history
+  );
+
+  if (localAns.answered) {
+    return res.json({
+      understood: true,
+      reply: localAns.reply,
+      updated_markdown: currentMarkdown,
+      updated_school: school,
+      should_solve: false,
+      applied_changes: [],
+      analysis: InBrowserSchoolEngine.analyzeSchool(school),
+    });
+  }
+
+  // 2. Open-ended requests or complex mutations via Server-Side Gemini (when configured)
   if (genAI) {
     try {
       const { response } = await generateGeminiContentWithFallback([
@@ -528,28 +550,6 @@ ${effectiveMessage}`,
       console.warn("Server-side Gemini chat failed, falling back to local assistant:", e);
     }
   }
-
-  // High-intelligence Local School Q&A Assistant (Zero Latency, Full Data Access)
-  const localAns = answerSchoolQuestion(
-    effectiveMessage,
-    school,
-    schedule,
-    InBrowserSchoolEngine.analyzeSchool(school),
-    history
-  );
-
-  if (localAns.answered) {
-    return res.json({
-      understood: true,
-      reply: localAns.reply,
-      updated_markdown: currentMarkdown,
-      updated_school: school,
-      should_solve: false,
-      applied_changes: [],
-      analysis: InBrowserSchoolEngine.analyzeSchool(school),
-    });
-  }
-
   return res.json({
     understood: true,
     reply:
