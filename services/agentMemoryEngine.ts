@@ -118,16 +118,16 @@ export function extractPeriodNumbersFromText(text: string): number[] {
   const cleaned = text.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ");
   const norm = normAr(cleaned);
 
-  // Check explicit "الحصة X" digits first
+  // Check explicit "الحصة X" digits first (supports 1..20 so out-of-bounds validation catches period 15 safely)
   for (const m of cleaned.matchAll(/(?:الحص[ةه]|حص[ةه])\s*(\d{1,2})\b/g)) {
     const v = Number(m[1]);
-    if (v >= 1 && v <= 10 && !found.includes(v)) found.push(v);
+    if (v >= 1 && v <= 20 && !found.includes(v)) found.push(v);
   }
-  for (const m of cleaned.matchAll(/\b([1-9]|10)\s*و\s*([1-9]|10)\b/g)) {
+  for (const m of cleaned.matchAll(/\b([1-9]|1[0-9]|20)\s*و\s*([1-9]|1[0-9]|20)\b/g)) {
     const a = Number(m[1]);
     const b = Number(m[2]);
-    if (a >= 1 && a <= 10 && !found.includes(a)) found.push(a);
-    if (b >= 1 && b <= 10 && !found.includes(b)) found.push(b);
+    if (a >= 1 && a <= 20 && !found.includes(a)) found.push(a);
+    if (b >= 1 && b <= 20 && !found.includes(b)) found.push(b);
   }
   if (found.length > 0) return found;
 
@@ -509,9 +509,9 @@ export function tryExecuteExtendedAgentAction(
     }
   }
 
-  // 2. Rename School ("غير اسم المدرسة إلى ..." / "سمي المدرسة ...")
+  // 2. Rename School ("غير اسم المدرسة إلى ..." / "خلي اسم المدرسة ..." / "سمي المدرسة ...")
   const renameMatch = message.match(
-    /(?:غير\s+اسم\s+المدرس[ةه]|سم[ّ]?ي\s+المدرس[ةه]|اجعل\s+اسم\s+المدرس[ةه])\s*(?:الى|إلى|لـ?|بـ?)?\s*[:\-]?\s*(.+)$/i
+    /(?:غير|عدل|خلي|بدل|سم[ّ]?ي|اجعل)\s+اسم\s+المدرس[ةه]\s*(?:الى|إلى|لـ?|بـ?)?\s*[:\-]?\s*(.+)$/i
   );
   if (renameMatch && renameMatch[1]?.trim().length >= 2) {
     const newName = renameMatch[1].trim().replace(/^["']|["']$/g, "");
@@ -729,28 +729,45 @@ export function tryExecuteExtendedAgentAction(
     };
   }
 
-  // 4. Subject Rules ("خلي الدين قبل الفسحة" / "خلي مادة الرياضيات مزدوجة" / "خلي الحاسب فردي")
-  if (resolved.subject && /(قبل الفسح[ةه]|مزدوج[ةه]|فردي[ةه])/.test(n) && !resolved.teacher) {
-    const sub = resolved.subject;
-    const wantBeforeBreak = /قبل الفسح[ةه]/.test(n);
-    const wantDouble = /مزدوج[ةه]/.test(n) && !/(الغ|الغي|مش|بلاش|بدون|منع)/.test(n);
-    const wantSingle = /فردي[ةه]/.test(n) || (/(الغ|الغي|منع)/.test(n) && /مزدوج[ةه]/.test(n));
+  // 4. Subject Rules ("خلي الدين قبل الفسحة" / "الغي قبل الفسحة" / "خلي مادة الرياضيات مزدوجة" / "خلي الانجلش مزدوج")
+  const explicitSubjectInMsg = findMatchingSubjectInSchool(school.subjects, message) || findSubjectInMessage(school, message);
+  const hasExplicitTeacherTitle = /(?:استاذ|أستاذ|معلم|معلمة|مس|كابتن|شيخ|دكتور)/.test(n);
+  const teacherTokensInsideSubject =
+    explicitSubjectInMsg && resolved.teacher
+      ? resolved.teacher.name
+          .split(/\s+/)
+          .some((tok) => tok.length >= 2 && normAr(explicitSubjectInMsg.name).includes(normAr(tok)))
+      : false;
+  const preferSubjectOverTeacher =
+    Boolean(explicitSubjectInMsg) &&
+    !hasExplicitTeacherTitle &&
+    (/\bماد[ةه]\b/.test(n) || !resolved.usedTeacherFromContext || teacherTokensInsideSubject || !resolved.teacher);
+
+  if (explicitSubjectInMsg && /(قبل الفسح[ةه]|مزدوج[ةه]?|فردي[ةه]?)/.test(n) && (preferSubjectOverTeacher || !resolved.teacher)) {
+    const sub = explicitSubjectInMsg;
+    const isCancelVerb = /(?:الغ|الغي|إلغاء|شيل|بدون|منع|امنع|لا\s*تكون|مش)/.test(n);
+    const hasBeforeBreakPhrase = /قبل الفسح[ةه]/.test(n);
+    const wantEnableBeforeBreak = hasBeforeBreakPhrase && !isCancelVerb;
+    const wantDisableBeforeBreak = hasBeforeBreakPhrase && isCancelVerb;
+    const wantSingle = /فردي[ةه]?/.test(n) || (isCancelVerb && /مزدوج[ةه]?/.test(n));
+    const wantDouble = /مزدوج[ةه]?/.test(n) && !wantSingle;
 
     const updatedSubjects = school.subjects.map((s) => {
       if (s.id !== sub.id) return s;
       return {
         ...s,
-        before_break: wantBeforeBreak ? true : s.before_break,
-        double_period_policy: wantDouble
-          ? ("DOUBLE_REQUIRED" as const)
-          : wantSingle
-            ? ("SINGLE_ONLY" as const)
+        before_break: wantEnableBeforeBreak ? true : wantDisableBeforeBreak ? false : s.before_break,
+        double_period_policy: wantSingle
+          ? ("SINGLE_ONLY" as const)
+          : wantDouble
+            ? ("DOUBLE_REQUIRED" as const)
             : s.double_period_policy,
       };
     });
     const updatedSchool: SchoolData = { ...school, subjects: updatedSubjects };
     const descParts: string[] = [];
-    if (wantBeforeBreak) descParts.push("قبل الفسحة");
+    if (wantEnableBeforeBreak) descParts.push("قبل الفسحة");
+    if (wantDisableBeforeBreak) descParts.push("إلغاء شرط قبل الفسحة");
     if (wantDouble) descParts.push("حصص مزدوجة إجبارية");
     if (wantSingle) descParts.push("حصص فردية فقط");
     const change = `ضبط سياسة مادة "${sub.name}" (${descParts.join("، ")})`;
@@ -765,14 +782,211 @@ export function tryExecuteExtendedAgentAction(
     };
   }
 
+  // 4B. Global School Double Policy ("امنع الحصص المزدوجة في المدرسة" / "رجع الحصص المزدوجة اختيارية")
+  if (
+    /(?:كل\s*المواد|في\s*المدرس[ةه]|المدرس[ةه]\s*كلها|على\s*الجميع)/.test(n) &&
+    /(?:مزدوج[ةه]?|فردي[ةه]?)/.test(n)
+  ) {
+    const isSingle = /(?:امنع|منع|الغي|الغ|بدون|فردي[ةه]?)/.test(n);
+    const isFree = /(?:اختياري[ةه]?|حره|حرة|عادي[ةه]?|رجع.*اختيار|فك)/.test(n);
+    const policy: "FREE" | "DOUBLE_REQUIRED" | "SINGLE_ONLY" = isFree ? "FREE" : isSingle ? "SINGLE_ONLY" : "DOUBLE_REQUIRED";
+    const updatedSchool: SchoolData = {
+      ...school,
+      subjects: school.subjects.map((s) => ({ ...s, double_period_policy: policy })),
+      teachers: school.teachers.map((t) => ({
+        ...t,
+        force_double_periods: policy === "DOUBLE_REQUIRED",
+        work_pattern: t.work_pattern
+          ? { ...t.work_pattern, double_period_policy: policy }
+          : { day_rules: {}, daily_period_rules: [], placement_rules: [], double_period_policy: policy },
+      })),
+    };
+    const label =
+      policy === "SINGLE_ONLY"
+        ? "منع الحصص المزدوجة (حصص فردية فقط) في المدرسة كلها"
+        : policy === "FREE"
+          ? "إرجاع سياسة الحصص المزدوجة إلى اختيارية/حرة في المدرسة"
+          : "تفعيل الحصص المزدوجة في المدرسة كلها";
+    return {
+      handled: true,
+      reply: `✓ تم ${label}، وجاري إعادة بناء الجدول الآن.`,
+      updated_school: updatedSchool,
+      updated_markdown: generateSchoolMarkdown(updatedSchool, [label]),
+      should_solve: true,
+      applied_changes: [label],
+    };
+  }
+
+  // 4C. School Break Period Setting ("خلي الفسحة بعد الحصة 4")
+  const breakM = n.match(/(?:اجعل|خلي|غير|عدل|حدد)\s+(?:وقت\s+)?الفسح[ةه]\s+بعد\s+(?:الحص[ةه]\s*)?(\d+|ثاني[ةه]?|ثالث[ةه]?|رابع[ةه]?|خامس[ةه]?)/);
+  if (breakM) {
+    const bMap: Record<string, number> = { ثاني: 2, ثانيه: 2, ثالث: 3, ثالثه: 3, رابع: 4, رابعه: 4, خامس: 5, خامسه: 5 };
+    const breakNum = /^\d+$/.test(breakM[1]) ? Number(breakM[1]) : (bMap[breakM[1]] ?? 3);
+    if (breakNum >= 1 && breakNum <= 8) {
+      const updatedSchool: SchoolData = {
+        ...school,
+        rules: { ...(school.rules || {}), break_after_period: breakNum },
+      };
+      const change = `ضبط موعد الفسحة بعد الحصة ${breakNum}`;
+      return {
+        handled: true,
+        reply: `✓ تم ${change} بنجاح، وجاري تحديث الجدول.`,
+        updated_school: updatedSchool,
+        updated_markdown: generateSchoolMarkdown(updatedSchool, [change]),
+        should_solve: true,
+        applied_changes: [change],
+      };
+    }
+  }
+
+  // 4D. Standalone Add Subject ("أضف مادة خط عربي")
+  const addSubM = message.match(/^(?:اضف|أضف|ضيف|زود)\s+ماد[ةه]\s+(?:جديد[ةه]\s+)?([^\n\d]+)$/i);
+  if (addSubM && !/\b[1-6]\s*[\/\\]\s*[1-9]\b/.test(message)) {
+    const newSubName = addSubM[1].trim().replace(/[.؛;!]+$/, "").trim();
+    if (newSubName.length >= 2) {
+      const exists = school.subjects.find((s) => normAr(s.name) === normAr(newSubName));
+      if (exists) {
+        return {
+          handled: true,
+          reply: `ℹ️ المادة "${exists.name}" موجودة بالفعل في المدرسة.`,
+          should_solve: false,
+          applied_changes: [],
+        };
+      }
+      const newSub: Subject = {
+        id: `SUB_${Date.now().toString(36).slice(-4)}`,
+        name: newSubName,
+        code: newSubName,
+        double_period_policy: "FREE",
+      };
+      const updatedSchool: SchoolData = { ...school, subjects: [...school.subjects, newSub] };
+      const change = `إضافة مادة جديدة "${newSubName}"`;
+      return {
+        handled: true,
+        reply: `✓ تم ${change}. يمكنك الآن إسناد حصصها لأي فصل ومعلم.`,
+        updated_school: updatedSchool,
+        updated_markdown: generateSchoolMarkdown(updatedSchool, [change]),
+        should_solve: false,
+        applied_changes: [change],
+      };
+    }
+  }
+
+  // 4E. Rename Teacher ("عدل اسم المعلم علاء إلى الأستاذ علاء منصور")
+  const renTchM = message.match(
+    /(?:غير|عدل|بدل)\s+اسم\s+(?:ال)?(?:معلم|معلمه|معلمة|مدرس|مدرسه|مدرسة|استاذ|أستاذ)\s+(.+?)\s+(?:الى|إلى|لـ)\s+(.+)$/i
+  );
+  if (renTchM) {
+    const oldRef = renTchM[1].trim();
+    const newRef = renTchM[2].trim().replace(/^(?:ال)?(?:أستاذ|استاذ|معلم|مدرس)\s+/, (m) => m).replace(/[.؛;!]+$/, "").trim();
+    const oldT =
+      school.teachers.find((t) => normAr(t.name) === normAr(oldRef)) ||
+      school.teachers.find((t) => normAr(t.name).includes(normAr(oldRef)));
+    if (oldT && newRef.length >= 2) {
+      const updatedSchool: SchoolData = {
+        ...school,
+        teachers: school.teachers.map((t) => (t.id === oldT.id ? { ...t, name: newRef } : t)),
+      };
+      const change = `تعديل اسم المعلم "${oldT.name}" إلى "${newRef}"`;
+      return {
+        handled: true,
+        reply: `✓ تم ${change} بنجاح.`,
+        updated_school: updatedSchool,
+        updated_markdown: generateSchoolMarkdown(updatedSchool, [change]),
+        should_solve: false,
+        applied_changes: [change],
+      };
+    }
+  }
+
+  // 4F. Guard against granting MANDATORY_OFF on ALL active school days to a teacher with lessons
+  if (/(?:اجاز[ةهت]|اوف|أوف|تفرغ)/.test(n) && resolved.teacher && !/(?:تراجع|الغ|الغي|شيل)/.test(n)) {
+    const offDaysReq = parseDaysList(message.replace(resolved.teacher.name, " "));
+    const schoolActiveDays = getOrderedSchoolDays(school);
+    const tchLoad = school.assignments
+      .filter((a) => a.teacher_id === resolved.teacher!.id)
+      .reduce((s, a) => s + a.weekly_periods, 0);
+    if (tchLoad > 0 && schoolActiveDays.length > 0 && schoolActiveDays.every((d) => offDaysReq.includes(d))) {
+      return {
+        handled: true,
+        reply: `⚠️ تعذر تنفيذ الطلب: الأستاذ "${resolved.teacher.name}" لديه ${tchLoad} حصة أسبوعياً ولا يمكن منحه إجازة في جميع أيام الدراسة (${schoolActiveDays.length} أيام).`,
+        should_solve: false,
+        applied_changes: [],
+      };
+    }
+  }
+
+  // 4G. Direct Section-Subject Assignment / Quota Update ("اسند اقتصاد 1 حصة لفصل 1/1 للأستاذ علاء" / "اجعل حصص العربي في 1/1 سبع حصص")
+  const secMatch4G = message.match(/\b([1-6])\s*[\/\\]\s*([1-9])\b/);
+  if (
+    secMatch4G &&
+    explicitSubjectInMsg &&
+    /(?:اسند|أسند|اعطي|أعطي|خصص|اجعل|عدل|غير|خلي|حدد|زود|قلل|ضبط)/.test(n) &&
+    !/(?:انقل|حرك|نقل|بدل|ثب[ّ]?ت|تثبيت|قفل|احذف|امسح|ضيف فصل|اضف فصل)/.test(n)
+  ) {
+    const secCode = `${secMatch4G[1]}/${secMatch4G[2]}`;
+    const msgNoSec = n.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ");
+    const wordToCount: Record<string, number> = {
+      واحد: 1, واحده: 1, حصه: 1, اثنين: 2, اتنين: 2, حصتين: 2, ثلاث: 3, ثلاثه: 3, تلات: 3, تلاته: 3,
+      اربع: 4, اربعه: 4, خمس: 5, خمسه: 5, ست: 6, سته: 6, سبع: 7, سبعه: 7, ثمان: 8, ثمانيه: 8, تمان: 8, تمانيه: 8,
+      تسع: 9, تسعه: 9, عشر: 10, عشره: 10,
+    };
+    let countVal: number | null = null;
+    const dM = msgNoSec.match(/(?:^|\s)(\d{1,2})(?=\s|$)/);
+    if (dM) countVal = Number(dM[1]);
+    if (countVal === null) {
+      for (const tok of msgNoSec.split(/\s+/)) {
+        if (tok in wordToCount) countVal = wordToCount[tok];
+      }
+    }
+    if (countVal !== null && countVal >= 0 && countVal <= 20) {
+      // Strip section codes (e.g. "1/1") and "<numberWord> حصص" BEFORE teacher matching so "1/1" never matches "نشاط 1" and "سبع حصص" never matches "ياسر السبع"
+      const msgForTch = message
+        .replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ")
+        .replace(
+          /(?:^|\s)(?:واحد[ةه]?|اثنين|اتنين|ثلاث[ةه]?|تلات[ةه]?|اربع[ةه]?|خمس[ةه]?|ست[ةه]?|سبع[ةه]?|ثمان(?:ي[ةه])?|تمان(?:ي[ةه])?|تسع[ةه]?|عشر[ةه]?|\d+)\s+(?:حص[ةهص]|حصتين)/g,
+          " "
+        )
+        .trim();
+      const tMatches = findTeachersInMessage(school, msgForTch);
+      const targetT = tMatches.length === 1 ? tMatches[0] : resolveTeacherFromMessage(school, msgForTch).teacher;
+      const ops: Op[] = [
+        {
+          op: "set_assignment",
+          section: secCode,
+          subject: explicitSubjectInMsg.name,
+          teacher: targetT?.name,
+          periods: countVal,
+        },
+      ];
+      const resOps = applyOps(school, ops);
+      if (resOps.changed || resOps.changes.length > 0) {
+        return {
+          handled: true,
+          reply:
+            `✓ تم تنفيذ التعديل المطلوب بنجاح:\n` +
+            resOps.changes.map((c) => `✓ ${c}`).join("\n") +
+            `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`,
+          updated_school: resOps.school,
+          updated_markdown: generateSchoolMarkdown(resOps.school, resOps.changes),
+          should_solve: true,
+          applied_changes: resOps.changes,
+        };
+      }
+    }
+  }
+
   // 5. Teacher Specific Constraints (Max daily periods, Max consecutive, Double period toggle)
   if (resolved.teacher && /(تتابع|متتالي[ةه]|اقص[يى] حصص|حد اقص[يى]|مزدوج[ةه])/.test(n)) {
     const tch = resolved.teacher;
-    const numM = message.match(/(\d+|حصتين|ثلاث|تلات|اربع|خمس|ست)/);
+    const numM = n.match(/(?:^|\s)(\d+|حصتين|ثلاث[ةه]?|تلات[ةه]?|اربع[ةه]?|خمس[ةه]?|ست[ةه]?)(?=\s|$)/);
     let numVal = 0;
     if (numM) {
-      const rawN = numM[1];
-      const map: Record<string, number> = { حصتين: 2, ثلاث: 3, تلات: 3, اربع: 4, خمس: 5, ست: 6 };
+      const rawN = numM[1].trim();
+      const map: Record<string, number> = {
+        حصتين: 2, ثلاث: 3, ثلاثه: 3, تلات: 3, تلاته: 3,
+        اربع: 4, اربعه: 4, خمس: 5, خمسه: 5, ست: 6, سته: 6,
+      };
       numVal = map[rawN] ?? Number(rawN);
     }
 
@@ -859,25 +1073,45 @@ export function tryExecuteExtendedAgentAction(
         school.grades.find((g) => g.order === gradeOrder) ||
         school.grades[0] || { id: `grade_${gradeOrder}`, name: `الصف ${gradeOrder}`, code: `G${gradeOrder}`, order: gradeOrder };
       const newSecId = `SEC_${gradeOrder}_${secCodeMatch[2]}_${Date.now().toString(36).slice(-3)}`;
+      const copyMatch = message.match(/(?:مثل|زي|نسخ|مشابه\s*لـ?)\s*(?:فصل\s*)?([1-6]\s*[\/\\]\s*[1-9])/);
+      const copyCode = copyMatch ? copyMatch[1].replace(/\s+/g, "").replace(/\\/g, "/") : null;
+      const sourceSec = copyCode
+        ? school.sections.find((s) => s.name === copyCode || s.code === copyCode)
+        : undefined;
       const newSec: Section = {
         id: newSecId,
         name: code,
         code,
         grade_id: targetGrade.id,
-        shift: school.sections[0]?.shift || "FIRST",
+        shift: sourceSec?.shift || school.sections[0]?.shift || "FIRST",
+        daily_period_limits: sourceSec?.daily_period_limits ? { ...sourceSec.daily_period_limits } : undefined,
       };
+      const copiedAssignments = sourceSec
+        ? school.assignments
+            .filter((a) => a.section_id === sourceSec.id)
+            .map((a, idx) => ({
+              ...a,
+              id: `ASG_${newSecId}_${idx}_${Date.now().toString(36).slice(-2)}`,
+              section_id: newSecId,
+            }))
+        : [];
       const updatedSchool: SchoolData = {
         ...school,
         grades: school.grades.some((g) => g.id === targetGrade.id) ? school.grades : [...school.grades, targetGrade],
         sections: [...school.sections, newSec],
+        assignments: [...school.assignments, ...copiedAssignments],
       };
-      const change = `إضافة فصل جديد "${code}" تحت "${targetGrade.name}"`;
+      const change = sourceSec
+        ? `إضافة فصل جديد "${code}" منسوخاً من "${sourceSec.name}" (${copiedAssignments.length} إسنادات)`
+        : `إضافة فصل جديد "${code}" تحت "${targetGrade.name}"`;
       return {
         handled: true,
-        reply: `✓ تم ${change}. يمكنك الآن إسناد المواد له في الشات مثل: "اسند عربي 6 حصص لفصل ${code} للأستاذ فلان".`,
+        reply: sourceSec
+          ? `✓ تم ${change} بنجاح، وجاري إعادة بناء وتوزيع الجدول الآن.`
+          : `✓ تم ${change}. يمكنك الآن إسناد المواد له في الشات مثل: "اسند عربي 6 حصص لفصل ${code} للأستاذ فلان".`,
         updated_school: updatedSchool,
         updated_markdown: generateSchoolMarkdown(updatedSchool, [change]),
-        should_solve: false,
+        should_solve: Boolean(sourceSec && copiedAssignments.length > 0),
         applied_changes: [change],
       };
     }

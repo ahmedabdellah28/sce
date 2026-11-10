@@ -469,9 +469,11 @@ function parseClauseInto(clause: string, allDays: number[], out: ParsedRuleText)
   const restrictedOnlyMatch = nRaw.match(
     /(?:(?:مبتداومش|مابتداومش|ما\s*بتداومش|لا\s*(?:يعمل|تعمل|يداوم|تداوم|يحضر|تحضر))\s*(?:غير|الا|سوي)\s*|(?:قصر|اقتصر)\s*(?:حضور|دوام|عمل)[^،.]*?علي\s*|(?:تيجي|يجي|تداوم|يداوم|تحضر|يحضر)\s+(?:في\s+)?)(?:يوم\s+)?(?:ال)?(?:سبت|احد|اثنين|اتنين|ثلاثاء|تلات|اربعاء|اربع|خميس)(?:\s*(?:،|و)\s*(?:ال)?(?:سبت|احد|اثنين|اتنين|ثلاثاء|تلات|اربعاء|اربع|خميس))*(?:\s+(?:بس|فقط))?/
   );
+  const precedingRaw = restrictedOnlyMatch?.index ? nRaw.slice(0, restrictedOnlyMatch.index) : "";
+  const negatedBeforeRestriction = /(?:^|\s)(?:ما|مش|لا|لم|لن)\s*$/.test(precedingRaw);
   const restrictedExplicit = restrictedOnlyMatch
     ? /(?:^|\s)(?:غير|الا|سوي|علي|بس|فقط)(?=\s|$)/.test(restrictedOnlyMatch[0]) &&
-      !/(?:^|\s)(?:ما|مش|لا)\s+(?:تيجي|يجي|تداوم|يداوم|تحضر|يحضر)(?=\s|$)/.test(nRaw)
+      (!negatedBeforeRestriction || /(?:^|\s)(?:غير|الا|سوي)(?=\s|$)/.test(restrictedOnlyMatch[0]))
     : false;
   if (restrictedOnlyMatch && restrictedExplicit) {
     const allowedFromFrag = parseDaysList(restrictedOnlyMatch[0]);

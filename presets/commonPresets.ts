@@ -1133,8 +1133,11 @@ export function tryApplyDailyPeriodsChatCommand(
   const n = normalizeSubjectText(message);
   if (!n) return null;
 
-  // Ignore teacher-specific rules or teacher-name mentions (e.g., "خلي صفاء...", "محمد طاهر الأحد...")
+  // Ignore teacher-specific or single-subject assignment commands (e.g., "اجعل حصص العربي في 1/1 سبع حصص")
   if (/(?:استاذ|مس|كابتن|معلم|مدرس|شيخ|اجازه|اوف|مزدوج|تفرغ|حضور|يداوم|تداوم|معفي|رضاع|لا يعمل|الحصص الاخيره|الحصص الاولي|اول حصص|اخر حصص)/.test(n)) {
+    return null;
+  }
+  if (findMatchingSubjectInSchool(school.subjects, message) && /\b[1-6]\s*[\/\\]\s*[1-9]\b/.test(message)) {
     return null;
   }
   const hasExplicitGradeScope =
