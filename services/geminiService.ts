@@ -36,6 +36,12 @@ import {
 } from "./apiKeyManager.ts";
 import { isQuestionOrInquiry, answerSchoolQuestion } from "./schoolAssistant.ts";
 import { parseUnstructuredArabicSchoolText } from "./unstructuredParser.ts";
+import {
+  enrichMessageWithMemoryContext,
+  tryExecuteExtendedAgentAction,
+  buildLiveAgentContextDigest,
+  type AgentUiActionType,
+} from "./agentMemoryEngine.ts";
 
 export const DEFAULT_BACKEND_URL = "";
 
@@ -521,9 +527,12 @@ export class HybridSchoolService {
     reply: string;
     updated_markdown?: string | null;
     updated_school: SchoolData | null;
+    updated_schedule?: Schedule | null;
     should_solve: boolean;
     applied_changes: string[];
     analysis?: AnalysisReport;
+    ui_action?: AgentUiActionType;
+    ui_target_id?: string;
   }> {
     // 1. Try server deterministic interpreter (which also resolves local .md file references in dev)
     try {
@@ -551,8 +560,64 @@ export class HybridSchoolService {
     const currentMarkdown = markdown || NESSCHINFO_RAW_TEXT;
     // 2. In-browser deterministic command interpreter (for mutations/commands)
     const isQuery = isQuestionOrInquiry(message);
+    const ctxMessage = enrichMessageWithMemoryContext(message, school, history);
     if (!isQuery) {
-      const periodCmd = tryApplyDailyPeriodsChatCommand(school, message);
+      // 2a. Full multi-line school import pasted directly into chat
+      if (message.trim().split(/\r?\n/).length >= 5 && message.trim().length >= 150) {
+        const hasMarkdownTables = /\|[^\n]+\|/.test(message);
+        if (!hasMarkdownTables) {
+          const unstructuredFull = parseUnstructuredArabicSchoolText(message);
+          if (unstructuredFull) {
+            return {
+              reply: `✓ ${unstructuredFull.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
+              updated_markdown: generateSchoolMarkdown(unstructuredFull.school, unstructuredFull.notes),
+              updated_school: unstructuredFull.school,
+              should_solve: true,
+              applied_changes: unstructuredFull.notes,
+              analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFull.school),
+            };
+          }
+        }
+        const parsedFull = parseSchoolText(message);
+        if (parsedFull.school && parsedFull.school.sections.length >= 2 && parsedFull.school.assignments.length >= 4) {
+          const msgChange = `استيراد مدرسة "${parsedFull.school.name}" (${parsedFull.school.sections.length} فصول، ${parsedFull.school.teachers.length} معلماً)`;
+          return {
+            reply: `✓ تم ${msgChange} بنجاح، وجاري توليد الجدول فوراً.`,
+            updated_markdown: generateSchoolMarkdown(parsedFull.school, [msgChange]),
+            updated_school: parsedFull.school,
+            should_solve: true,
+            applied_changes: [msgChange],
+            analysis: InBrowserSchoolEngine.analyzeSchool(parsedFull.school),
+          };
+        }
+        const unstructuredFallback = parseUnstructuredArabicSchoolText(message);
+        if (unstructuredFallback) {
+          return {
+            reply: `✓ ${unstructuredFallback.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
+            updated_markdown: generateSchoolMarkdown(unstructuredFallback.school, unstructuredFallback.notes),
+            updated_school: unstructuredFallback.school,
+            should_solve: true,
+            applied_changes: unstructuredFallback.notes,
+            analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFallback.school),
+          };
+        }
+      }
+      const extAction = tryExecuteExtendedAgentAction(ctxMessage, school, schedule, history);
+      if (extAction && extAction.handled) {
+        const nextSchool = extAction.updated_school || school;
+        return {
+          reply: extAction.reply,
+          updated_markdown: extAction.updated_markdown || currentMarkdown,
+          updated_school: extAction.updated_school || school,
+          updated_schedule: extAction.updated_schedule || null,
+          should_solve: extAction.should_solve,
+          applied_changes: extAction.applied_changes,
+          analysis: InBrowserSchoolEngine.analyzeSchool(nextSchool),
+          ui_action: extAction.ui_action,
+          ui_target_id: extAction.ui_target_id,
+        };
+      }
+      const periodCmd = tryApplyDailyPeriodsChatCommand(school, ctxMessage);
       if (periodCmd) {
         return {
           updated_school: periodCmd.school,
@@ -563,9 +628,9 @@ export class HybridSchoolService {
           analysis: InBrowserSchoolEngine.analyzeSchool(periodCmd.school),
         };
       }
-      const normalizedForCmd = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء)\s*(?:ل)?(?:ال)?جدول/.test(message.trim())
+      const normalizedForCmd = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء)\s*(?:ل)?(?:ال)?جدول/.test(ctxMessage.trim())
         ? "حل الجدول"
-        : expandAliasInChatMessage(school.subjects, message);
+        : expandAliasInChatMessage(school.subjects, ctxMessage);
       const cmd = interpretCommand(normalizedForCmd, school, history);
       if (cmd.understood) {
         let updatedSchool = school;
@@ -649,7 +714,7 @@ export class HybridSchoolService {
       try {
         const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
         if (Array.isArray(history) && history.length > 0) {
-          for (const h of history.slice(-8)) {
+          for (const h of history.slice(-14)) {
             if (h && h.text && h.role) {
               contents.push({
                 role: h.role === "user" ? "user" : "model",
@@ -673,6 +738,7 @@ ${currentMarkdown}
 ${JSON.stringify(school)}
 \`\`\`
 ${schedule ? `حالة الجدول الحالي: حل بنجاح (${schedule.entries.length} حصة مجدولة، مؤشر جودة ${schedule.quality_score}%، 0 تعارضات).` : "لم يتم إنشاء الجدول بعد."}
+${buildLiveAgentContextDigest(school, schedule, history)}
 
 طلب أو سؤال المستخدم:
 ${message}

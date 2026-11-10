@@ -32,6 +32,12 @@ import TimetableDiffPreview from "./components/TimetableDiffPreview.tsx";
 import { JadwalLogo } from "./components/JadwalLogo.tsx";
 import TeacherManagementHub from "./components/TeacherManagementHub.tsx";
 import { DAY_NAMES_AR, type SchoolData, type Schedule, type AnalysisReport, type TimetableEntry } from "./types.ts";
+import {
+  DEFAULT_CHAT_WELCOME_MESSAGE,
+  type ChatMessageRecord,
+  type SchoolUndoSnapshot,
+  type AgentUiActionType,
+} from "./services/agentMemoryEngine.ts";
 
 export interface SavedSchoolEntry {
   id: string;
@@ -40,6 +46,8 @@ export interface SavedSchoolEntry {
   raw_text: string;
   schedule?: Schedule | null;
   analysis?: AnalysisReport | null;
+  chat_history?: ChatMessageRecord[];
+  undo_stack?: SchoolUndoSnapshot[];
 }
 
 export interface CellPalette {
@@ -489,22 +497,40 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [isChatSubmitting, setIsChatSubmitting] = useState(false);
   const [chatLoadingStep, setChatLoadingStep] = useState<1 | 2 | 3>(1);
-  const [chatHistory, setChatHistory] = useState<
-    Array<{
-      role: "user" | "ai";
-      text: string;
-      changes?: string[];
-      isError?: boolean;
-      retryPrompt?: string;
-      timestamp?: string;
-    }>
-  >([
-    {
-      role: "ai",
-      text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي.\n\nأدِر بيانات المدرسة مباشرة: اطلب مني إعطاء إجازة لمعلم، تعديل أنصبة الحصص، أو تثبيت حصص أولى وأخيرة، وسأقوم فوراً بتحديث بيانات المدرسة وإعادة إنشاء الجدول تلقائياً بضمان 0% تعارضات.",
-      timestamp: "الآن",
-    },
-  ]);
+  const [chatHistory, setChatHistory] = useState<ChatMessageRecord[]>(() =>
+    Array.isArray(initialActiveEntry?.chat_history) && initialActiveEntry.chat_history.length > 0
+      ? initialActiveEntry.chat_history
+      : [DEFAULT_CHAT_WELCOME_MESSAGE]
+  );
+  const [undoStack, setUndoStack] = useState<SchoolUndoSnapshot[]>(() =>
+    Array.isArray(initialActiveEntry?.undo_stack) ? initialActiveEntry.undo_stack : []
+  );
+
+  // Persist active school chatHistory & undoStack automatically across refreshes
+  useEffect(() => {
+    if (!school?.id) return;
+    setSavedSchools((prev) => {
+      const idx = prev.findIndex((s) => s.id === school.id);
+      if (idx < 0) return prev;
+      const nextEntry = {
+        ...prev[idx],
+        chat_history: chatHistory.slice(-60),
+        undo_stack: undoStack.slice(-15),
+      };
+      const updated = [...prev];
+      updated[idx] = nextEntry;
+      try {
+        localStorage.setItem("AI_STUDIO_SAVED_SCHOOLS_V2", JSON.stringify(updated));
+      } catch {
+        // If quota exceeded, keep chat_history while trimming older undo snapshots
+        try {
+          const compact = updated.map((e) => ({ ...e, undo_stack: (e.undo_stack || []).slice(-3) }));
+          localStorage.setItem("AI_STUDIO_SAVED_SCHOOLS_V2", JSON.stringify(compact));
+        } catch {}
+      }
+      return updated;
+    });
+  }, [chatHistory, undoStack, school?.id]);
 
 
   // RTL Layout: Collapsible & Resizable Right Chat Sidebar & Mobile Bottom Sheet
@@ -617,6 +643,12 @@ export default function App() {
       const localFound = savedSchools.find((s) => s.id === presetId);
       if (localFound) {
         setSchool(localFound.school);
+        setChatHistory(
+          Array.isArray(localFound.chat_history) && localFound.chat_history.length > 0
+            ? localFound.chat_history
+            : [DEFAULT_CHAT_WELCOME_MESSAGE]
+        );
+        setUndoStack(Array.isArray(localFound.undo_stack) ? localFound.undo_stack : []);
         setRawText(localFound.raw_text || "");
         const ana = localFound.analysis || InBrowserSchoolEngine.analyzeSchool(localFound.school);
         setAnalysis(ana);
@@ -633,6 +665,8 @@ export default function App() {
 
       const data = await service.loadPreset(presetId);
       setSchool(data.school);
+      setChatHistory([DEFAULT_CHAT_WELCOME_MESSAGE]);
+      setUndoStack([]);
       setRawText(data.raw_text || "");
       setAnalysis(data.analysis);
       const solved = InBrowserSchoolEngine.solveInBrowser(data.school);
@@ -739,8 +773,9 @@ export default function App() {
       setStatusMessage(`تم إنشاء "${createdSchool.name}" بنجاح (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${createdSchool.assignments.length} تكليف)! يمكنك مراجعة الإسناد أو توليد الجدول مباشرة.`);
       setActiveTab(createdSchool.assignments.length > 0 ? "constraints" : "wizard");
 
-      setChatHistory((prev) => [
-        ...prev,
+      setUndoStack([]);
+      setChatHistory([
+        DEFAULT_CHAT_WELCOME_MESSAGE,
         {
           role: "ai",
           text: `تم إنشاء المدرسة الجديدة "${createdSchool.name}" بنجاح! تحتوي على ${createdSchool.sections.length} فصول و ${createdSchool.teachers.length} معلماً. اطلب مني أي تعديل أو اضغط على (إنشاء الجدول الآن).`,
@@ -807,6 +842,8 @@ export default function App() {
     setRawText(copyRawText);
     setAnalysis(copyAnalysis);
     setSchedule(null);
+    setUndoStack([]);
+    setChatHistory([DEFAULT_CHAT_WELCOME_MESSAGE]);
     setStatusMessage(`تم نسخ المدرسة بنجاح تحت اسم "${copyName}".`);
   }
 
@@ -874,17 +911,63 @@ export default function App() {
     const activeRawText = rawText || createBlankSchoolTemplate("مدرسة جديدة", 7).raw_text;
     const nowTime = new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
     setChatHistory((prev) => [...prev, { role: "user", text: msg, timestamp: nowTime }]);
+
+    // Real Snapshot Undo: handles "تراجع" / "الغي اخر تعديل" / "ارجع زي الاول" / "undo"
+    const isExactUndoReq = /^(?:تراجع(?:\s+عن\s+(?:اخر|آخر)\s*(?:تعديل|طلب|خطوة))?|الغي\s+(?:اخر|آخر)\s*(?:تعديل|طلب)|ارجع\s+(?:خطوة|زي\s+الاول|للخلف)|undo)$/i.test(
+      msg.replace(/[؟?!.،]/g, "").trim()
+    );
+    if (isExactUndoReq && undoStack.length > 0) {
+      const lastSnap = undoStack[undoStack.length - 1];
+      setUndoStack((prev) => prev.slice(0, -1));
+      setSchool(lastSnap.school);
+      const restoredMd = generateSchoolMarkdown(lastSnap.school);
+      setRawText(restoredMd);
+      const restoredAna = InBrowserSchoolEngine.analyzeSchool(lastSnap.school);
+      setAnalysis(restoredAna);
+      const restoredSchedule = lastSnap.schedule || InBrowserSchoolEngine.solveInBrowser(lastSnap.school).schedule;
+      setSchedule(restoredSchedule);
+      setPendingDiff(null);
+      persistSchoolData(lastSnap.school, restoredMd, restoredSchedule, restoredAna);
+      const undoReply = `↩️ تم التراجع الفوري بنجاح واستعادة الحالة السابقة قبل: (${lastSnap.label}).`;
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          text: undoReply,
+          changes: [`التراجع عن: ${lastSnap.label}`],
+          timestamp: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
+        },
+      ]);
+      setStatusMessage(undoReply);
+      return;
+    }
+
     setIsChatSubmitting(true);
     setChatLoadingStep(1);
     setLoading(true);
     try {
       const res = await service.chatWithCopilot(msg, activeSchool, schedule, activeRawText, chatHistory);
       setChatLoadingStep(2);
+
+      const mutatedSchool = Boolean(res.updated_school && res.applied_changes && res.applied_changes.length > 0);
+      const mutatedSchedule = Boolean((res as any).updated_schedule);
+      if (mutatedSchool || mutatedSchedule) {
+        setUndoStack((prev) => [
+          ...prev.slice(-14),
+          {
+            school: activeSchool,
+            schedule: schedule || null,
+            label: res.applied_changes?.[0] || msg.slice(0, 60),
+            timestamp: nowTime,
+          },
+        ]);
+      }
+
       if (res.updated_markdown) setRawText(res.updated_markdown);
       const targetSchool = res.updated_school || activeSchool;
       if (res.updated_school) {
         setSchool(res.updated_school);
-        if (school && (res.updated_school.name !== school.name || res.updated_school.id !== school.id)) {
+        if (school && res.updated_school.id !== school.id) {
           const newEntry: SavedSchoolEntry = {
             id: res.updated_school.id,
             name: res.updated_school.name,
@@ -902,6 +985,25 @@ export default function App() {
         }
       }
       if (res.analysis) setAnalysis(res.analysis);
+      if ((res as any).updated_schedule) {
+        const nextSched = (res as any).updated_schedule as Schedule;
+        setSchedule(nextSched);
+        setLastUpdatedTime(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }));
+        persistSchoolData(targetSchool, res.updated_markdown || rawText, nextSched, res.analysis || analysis);
+      }
+      // Trigger direct UI / Export / View actions requested in chat
+      const uiAct = (res as any).ui_action as AgentUiActionType | undefined;
+      const uiTarget = (res as any).ui_target_id as string | undefined;
+      if (uiAct) {
+        if (uiAct === "export_excel" && schedule) service.downloadExport("excel", targetSchool, schedule, "all").catch((e) => setErrorMessage(e.message));
+        else if (uiAct === "export_pdf_all" && schedule) service.downloadExport("pdf", targetSchool, schedule, "all").catch((e) => setErrorMessage(e.message));
+        else if (uiAct === "export_pdf_master" && schedule) service.downloadExport("pdf", targetSchool, schedule, "master").catch((e) => setErrorMessage(e.message));
+        else if (uiAct === "export_pdf_sections" && schedule) service.downloadExport("pdf", targetSchool, schedule, "sections").catch((e) => setErrorMessage(e.message));
+        else if (uiAct === "export_pdf_teachers" && schedule) service.downloadExport("pdf", targetSchool, schedule, "teachers").catch((e) => setErrorMessage(e.message));
+        else if (uiAct === "view_master") { setActiveTab("timetable"); setViewMode("master"); }
+        else if (uiAct === "view_section" && uiTarget) { setActiveTab("timetable"); setViewMode("section"); setSelectedSectionId(uiTarget); }
+        else if (uiAct === "view_teacher" && uiTarget) { setActiveTab("timetable"); setViewMode("teacher"); setSelectedTeacherId(uiTarget); }
+      }
       setChatHistory((prev) => [
         ...prev,
         {
@@ -1130,14 +1232,10 @@ export default function App() {
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={() =>
-              setChatHistory([
-                {
-                  role: "ai",
-                  text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي.\n\nيمكنك طلب تعديل أي قيد أو إجازة لمعلم أو تبديل حصص بالعامية المصرية أو الخليجية وسأقوم بتحديث الجدول تلقائياً بضمان 0% تعارضات.",
-                },
-              ])
-            }
+            onClick={() => {
+              setChatHistory([DEFAULT_CHAT_WELCOME_MESSAGE]);
+              setUndoStack([]);
+            }}
             className="text-[11px] text-stone-200 hover:text-white px-2 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 transition cursor-pointer"
             title="مسح سجل المحادثة والبدء من جديد"
             aria-label="مسح المحادثة"

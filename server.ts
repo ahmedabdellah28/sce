@@ -36,6 +36,11 @@ import {
 import { validateSchoolDataSchema } from "./services/apiKeyManager.ts";
 import { isQuestionOrInquiry, answerSchoolQuestion } from "./services/schoolAssistant.ts";
 import { parseUnstructuredArabicSchoolText } from "./services/unstructuredParser.ts";
+import {
+  enrichMessageWithMemoryContext,
+  tryExecuteExtendedAgentAction,
+  buildLiveAgentContextDigest,
+} from "./services/agentMemoryEngine.ts";
 
 const PORT = 3000;
 const HOST = "0.0.0.0";
@@ -406,8 +411,39 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
   const isQuery = isQuestionOrInquiry(effectiveMessage);
 
   // If not a query, check if deterministic mutation command interpreter recognizes it
+  const ctxMessage = enrichMessageWithMemoryContext(effectiveMessage, school, history);
   if (!isQuery) {
-    const periodCmd = tryApplyDailyPeriodsChatCommand(school, effectiveMessage);
+    if (effectiveMessage.trim().split(/\r?\n/).length >= 5 && effectiveMessage.trim().length >= 150) {
+      const unstructuredFull = parseUnstructuredArabicSchoolText(effectiveMessage);
+      if (unstructuredFull) {
+        return res.json({
+          understood: true,
+          reply: `✓ ${unstructuredFull.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
+          updated_markdown: generateSchoolMarkdown(unstructuredFull.school, unstructuredFull.notes),
+          updated_school: unstructuredFull.school,
+          should_solve: true,
+          applied_changes: unstructuredFull.notes,
+          analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFull.school),
+        });
+      }
+    }
+    const extAction = tryExecuteExtendedAgentAction(ctxMessage, school, schedule, history);
+    if (extAction && extAction.handled) {
+      const nextSchool = extAction.updated_school || school;
+      return res.json({
+        understood: true,
+        reply: extAction.reply,
+        updated_markdown: extAction.updated_markdown || currentMarkdown,
+        updated_school: extAction.updated_school || school,
+        updated_schedule: extAction.updated_schedule || null,
+        should_solve: extAction.should_solve,
+        applied_changes: extAction.applied_changes,
+        analysis: InBrowserSchoolEngine.analyzeSchool(nextSchool),
+        ui_action: extAction.ui_action,
+        ui_target_id: extAction.ui_target_id,
+      });
+    }
+    const periodCmd = tryApplyDailyPeriodsChatCommand(school, ctxMessage);
     if (periodCmd) {
       const solved = InBrowserSchoolEngine.solveInBrowser(periodCmd.school);
       return res.json({
@@ -423,9 +459,9 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
         analysis: InBrowserSchoolEngine.analyzeSchool(periodCmd.school),
       });
     }
-    const normalizedForCmd = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء)\s*(?:ل)?(?:ال)?جدول/.test(effectiveMessage.trim())
+    const normalizedForCmd = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء)\s*(?:ل)?(?:ال)?جدول/.test(ctxMessage.trim())
       ? "حل الجدول"
-      : expandAliasInChatMessage(school.subjects, effectiveMessage);
+      : expandAliasInChatMessage(school.subjects, ctxMessage);
     const cmd = interpretCommand(normalizedForCmd, school, history);
     if (cmd.understood) {
       let updatedSchool = school;
@@ -498,12 +534,19 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
   // 2. Open-ended requests or complex mutations via Server-Side Gemini (when configured)
   if (genAI) {
     try {
-      const { response } = await generateGeminiContentWithFallback([
-        {
-          role: "user",
-          parts: [
-            {
-              text: `${AGENT_SYSTEM_INSTRUCTION}
+      const geminiContents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+      if (Array.isArray(history) && history.length > 0) {
+        for (const h of history.slice(-14)) {
+          if (h && h.text && h.role) {
+            geminiContents.push({ role: h.role === "user" ? "user" : "model", parts: [{ text: h.text }] });
+          }
+        }
+      }
+      geminiContents.push({
+        role: "user",
+        parts: [
+          {
+            text: `${AGENT_SYSTEM_INSTRUCTION}
 
 بيانات المدرسة الحالية (SchoolData JSON):
 ${JSON.stringify(school, null, 2)}
@@ -511,14 +554,15 @@ ${JSON.stringify(school, null, 2)}
 وثيقة المدرسة الحالية (Markdown):
 ${currentMarkdown}
 
-${schedule ? `حالة الجدول الحالي: متولد بنجاح (${schedule.entries.length} حصة مجدولة، مؤشر الجودة: ${schedule.quality_score}%، 0 تعارضات).` : "الجدول لم يتم توليده بعد."}
+${schedule ? `حالة الجدول الحالي: متولد بنجاح (${schedule.entries.length} حصة مجدولة، مؤشر جودة ${schedule.quality_score}%، 0 تعارضات).` : "الجدول لم يتم توليده بعد."}
+${buildLiveAgentContextDigest(school, schedule, history)}
 
 طلب أو سؤال المستخدم:
 ${effectiveMessage}`,
-            },
-          ],
-        },
-      ]);
+          },
+        ],
+      });
+      const { response } = await generateGeminiContentWithFallback(geminiContents);
       const rawTextResponse = response.text || "";
       const jsonMatch = rawTextResponse.match(/\{[\s\S]*\}/);
       if (jsonMatch) {

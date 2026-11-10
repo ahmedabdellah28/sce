@@ -1,6 +1,11 @@
 import type { SchoolData, Schedule, AnalysisReport, Teacher, Section, Subject, TimetableEntry } from "../types.ts";
 import { DAY_NAMES_AR } from "../types.ts";
 import { findMatchingSubjectInSchool } from "../presets/commonPresets.ts";
+import {
+  resolveContextualEntities,
+  extractPeriodNumbersFromText,
+  findSectionInText,
+} from "./agentMemoryEngine.ts";
 import { normAr, parseDaysList } from "./arabicRules.ts";
 import {
   findTeachersInMessage,
@@ -22,16 +27,19 @@ export interface AssistantAnswer {
  */
 export function isQuestionOrInquiry(message: string): boolean {
   const raw = message.trim();
+  if (raw.split(/\r?\n/).length >= 5 && raw.length >= 150) return false;
   const n = normAr(raw);
 
   // Question marks
   if (/[?؟]/.test(raw)) return true;
 
-  // Interrogative words at start or within query
+  // Interrogative words at start (even after conversational connectors "و/طيب/طب") or memory/reserve lookups
+  const nNoPrefix = n.replace(/^(?:طيب\s+|طب\s+|وبعدين\s+|وكمان\s+|كمان\s+|و\s*)/, "").trim();
   if (
-    /^(هل|مين|من|كام|كم|ما|ماذا|ماهو|ماهي|مت[يى]|امت[يى]|اين|فين|ازاي|كيف|ليه|ايش|شو|شنو|اي|ايهم|عرفني|قولي|وريني|اشرح|فحص|افحص|راجع|شوف|تقرير|احصائيات|ملخص|استفسار|سؤال)\b/.test(
-      n
-    )
+    /^(هل|مين|من|كام|كم|ما|ماذا|ماهو|ماهي|مت[يى]|امت[يى]|اين|فين|ازاي|كيف|ليه|ايش|شو|شنو|ايه|اي|ايهم|عرفني|قولي|اشرح|فحص|افحص|راجع|شوف|تقرير|احصائيات|ملخص|استفسار|سؤال|فكرني)(?:\s|$)/.test(
+      nNoPrefix
+    ) ||
+    /(فاضي|متاح للاحتياطي|احتياطي|ايه اللي غيرناه|عملنا ايه|اخر تعديل كان|تاريخ المحادث[ةه]|امتى حص[ةه])/.test(n)
   ) {
     return true;
   }
@@ -47,7 +55,7 @@ export function isQuestionOrInquiry(message: string): boolean {
 
   // Timetable audit & inspection requests
   if (
-    /(افحص|فحص|راجع|مراجعة|شيك|تشييك|تحليل|تقرير|صحة الجدول|هل الجدول مظبوط|هل في تعارض|في تعارض|اي تعارض|مشاكل الجدول|عجز|العجز|شاغر|معن[يى] س\d*)/.test(
+    /(افحص|فحص|(?:^|\s)راجع(?:\s|$)|مراجع[ةه]|شيك|تشييك|تحليل|تقرير|صح[ةه] الجدول|هل الجدول مظبوط|هل في تعارض|في تعارض|اي تعارض|مشاكل الجدول|عجز|العجز|شاغر|معن[يى] س\d*)/.test(
       n
     )
   ) {
@@ -56,9 +64,17 @@ export function isQuestionOrInquiry(message: string): boolean {
 
   // General greetings & conversational prompts
   if (
-    /^(السلام عليكم|سلام عليكم|مرحبا|ازيك|صباح الخير|مساء الخير|اهلا|أهلا|هاي|hello|hi|مين انت|مين أنت|عرفني بنفسك|بتعمل ايه|بتعمل إيه|شكرا|تسلم|يعطيك العافية)\b/.test(
+    /^(السلام عليكم|سلام عليكم|مرحبا|ازيك|صباح الخير|مساء الخير|اهلا|أهلا|هاي|hello|hi|مين انت|مين أنت|عرفني بنفسك|بتعمل ايه|بتعمل إيه|شكرا|تسلم|يعطيك العافية)(?:\s|$)/.test(
       n
     )
+  ) {
+    return true;
+  }
+
+  // Follow-up pronoun inquiries without "?" (e.g., "طيب جدولهم يوم الاحد ايه", "واجازته", "ونصيبه")
+  if (
+    /(?:^|\s)(?:جدوله|جدولها|جدولهم|حصصه|حصصها|حصصهم|نصيبه|نصيبها|اجازته|اجازتها)(?:\s|$)/.test(n) &&
+    !/(خلي|عدل|غير|اديله|اديها|ثبت|انقل|بدل|شيل|احذف|ضيف|الغ|تراجع)/.test(n)
   ) {
     return true;
   }
@@ -66,7 +82,7 @@ export function isQuestionOrInquiry(message: string): boolean {
   // Teacher / Section schedule inquiry without mutation intent
   if (
     /(جدول|حصص)\s+(الاستاذ|الأستاذ|المعلم|المدرس|فصل|صف)\s+/.test(n) &&
-    !/(بدل|عدل|غير|شيل|احذف|حط|ضيف|سو جدول جديد|اعمل جدول جديد)/.test(n)
+    !/(اعرض|افتح|وريني|شغل|صدر|اطبع|حمل|ثبت|انقل|بدل|عدل|غير|شيل|احذف|حط|ضيف|سو جدول جديد|اعمل جدول جديد)/.test(n)
   ) {
     return true;
   }
@@ -83,15 +99,116 @@ export function answerSchoolQuestion(
   school: SchoolData,
   schedule?: Schedule | null,
   analysis?: AnalysisReport | null,
-  _history?: Array<{ role: string; text?: string }>
+  history?: Array<{ role: string; text?: string; changes?: string[]; isError?: boolean }>
 ): AssistantAnswer {
   const n = normAr(message);
+  const ctxRes = resolveContextualEntities(message, school, history);
+
+  // -------------------------------------------------------------
+  // 0. Session Memory & History Recall ("ايه اللي غيرناه؟" / "فكرني بطلباتي")
+  // -------------------------------------------------------------
+  if (/(ايه اللي غيرناه|غيرنا ايه|عملنا ايه|اللي عدلناه|فكرني بطلبات|طلباتنا السابقه|اخر تعديل كان|سجل التعديلات|ذاكره الشات)/.test(n)) {
+    const changesList = ctxRes.ctx.recentChanges;
+    const reqList = ctxRes.ctx.recentUserRequests;
+    return {
+      answered: true,
+      is_query: true,
+      topic: "memory_recall",
+      reply:
+        `🧠 ملخص ذاكرة الجلسة لمدرسة "${school.name}":\n\n` +
+        (changesList.length > 0
+          ? `• التعديلات المنفذة (${changesList.length}):\n` + changesList.map((c, idx) => `  ${idx + 1}. ${c}`).join("\n")
+          : "• لم تُسجَّل تعديلات فعلية في هذه الجلسة بعد.") +
+        (reqList.length > 0
+          ? `\n\n• آخر طلباتك في المحادثة:\n` + reqList.slice(-5).map((r) => `  - "${r}"`).join("\n")
+          : ""),
+    };
+  }
+
+  // -------------------------------------------------------------
+  // 0B. Substitute / Free Teachers Lookup ("مين فاضي يوم الخميس الحصة 4؟" / "احتياطي")
+  // -------------------------------------------------------------
+  if (/(فاضي|متاحين|احتياطي|اشراف|معندوش حصص|مش مشغول)/.test(n) && !/(تعارض|افحص)/.test(n)) {
+    const targetDay = ctxRes.days[0] ?? ctxRes.ctx.lastDay ?? school.days[0] ?? 0;
+    const periodsFound = extractPeriodNumbersFromText(message);
+    const targetPeriod = periodsFound[0] ?? ctxRes.ctx.lastPeriod ?? 1;
+    const dayName = DAY_NAMES_AR[targetDay] || `يوم ${targetDay}`;
+
+    if (!schedule || schedule.entries.length === 0) {
+      return {
+        answered: true,
+        is_query: true,
+        topic: "reserve_pending",
+        reply: `ℹ️ يرجى إنشاء وتوزيع الجدول أولاً لمعرفة المعلمين المتاحين للاحتياطي يوم ${dayName} الحصة ${targetPeriod}.`,
+      };
+    }
+
+    const busyIds = new Set(
+      schedule.entries.filter((e) => e.day === targetDay && e.period === targetPeriod).map((e) => e.teacher_id)
+    );
+    const freeTeachers = school.teachers
+      .filter((t) => t.work_pattern?.day_rules?.[String(targetDay)] !== "MANDATORY_OFF" && !busyIds.has(t.id))
+      .map((t) => ({
+        teacher: t,
+        dayLoad: schedule.entries.filter((e) => e.teacher_id === t.id && e.day === targetDay).length,
+        weekLoad: schedule.entries.filter((e) => e.teacher_id === t.id).length,
+      }))
+      .sort((a, b) => a.dayLoad - b.dayLoad || a.weekLoad - b.weekLoad);
+
+    if (freeTeachers.length === 0) {
+      return {
+        answered: true,
+        is_query: true,
+        topic: "reserve_none",
+        reply: `⚠️ جميع المعلمين الحاضرين يوم ${dayName} في الحصة ${targetPeriod} مشغولون بحصص أساسية حالياً.`,
+      };
+    }
+
+    const lines = freeTeachers.slice(0, 12).map(
+      (item, idx) =>
+        `${idx + 1}. الأستاذ ${item.teacher.name} (حصصه اليوم: ${item.dayLoad} · الأسبوعية: ${item.weekLoad})`
+    );
+    return {
+      answered: true,
+      is_query: true,
+      topic: "reserve_teachers",
+      reply:
+        `🩺 المعلمون المتاحون للاحتياطي يوم ${dayName} — الحصة ${targetPeriod} (${freeTeachers.length} معلم متاح، مرتبون من الأقل عبئاً):\n\n` +
+        lines.join("\n"),
+    };
+  }
+
+  // -------------------------------------------------------------
+  // 0C. Subject Schedule Slot Lookup ("امتى حصة الرياضة لفصل 1/1؟")
+  // -------------------------------------------------------------
+  if (/(امت[يى]|مواعيد|ايام|أيام)s+حص[ةه]?s+/.test(n) && ctxRes.subject && schedule && schedule.entries.length > 0) {
+    const sub = ctxRes.subject;
+    const sec = ctxRes.section;
+    const matching = schedule.entries
+      .filter((e) => e.subject_id === sub.id && (!sec || e.section_id === sec.id))
+      .sort((a, b) => a.day - b.day || a.period - b.period);
+    if (matching.length > 0) {
+      const lines = matching.slice(0, 24).map((e) => {
+        const sName = school.sections.find((s) => s.id === e.section_id)?.name || e.section_id;
+        const tName = school.teachers.find((t) => t.id === e.teacher_id)?.name || e.teacher_id;
+        return `• ${DAY_NAMES_AR[e.day]} الحصة ${e.period}: فصل ${sName} (${tName})`;
+      });
+      return {
+        answered: true,
+        is_query: true,
+        topic: "subject_slots",
+        reply:
+          `📅 مواعيد مادة "${sub.name}"${sec ? ` لفصل ${sec.name}` : ""} في الجدول (${matching.length} حصة):\n\n` +
+          lines.join("\n"),
+      };
+    }
+  }
 
   // -------------------------------------------------------------
   // 1. Greetings & Persona & Help
   // -------------------------------------------------------------
   if (
-    /^(السلام عليكم|سلام عليكم|مرحبا|ازيك|صباح الخير|مساء الخير|أهلا|اهلا|هاي|hello|hi)\b/.test(n) ||
+    /^(السلام عليكم|سلام عليكم|مرحبا|ازيك|صباح الخير|مساء الخير|أهلا|اهلا|هاي|hello|hi)(?:\s|$)/.test(n) ||
     /(مين انت|مين أنت|عرفني بنفسك|بتعمل ايه|بتعمل إيه|وظيفتك|من انت|من أنت)/.test(n)
   ) {
     const teacherCount = school.teachers.length;
@@ -122,7 +239,7 @@ export function answerSchoolQuestion(
   // 2. Schedule Audit, Collisions & Health Check (فحص الجدول)
   // -------------------------------------------------------------
   if (
-    /(تعارض|تعارضات|مشاكل|افحص|فحص|راجع|مراجعة|شيك|صحة الجدول|هل الجدول|جودة الجدول|نسبة الجودة|منضبط|كفاءة)/.test(
+    /(تعارض|تعارضات|مشاكل|افحص|فحص|(?:^|\s)راجع(?:\s|$)|مراجع[ةه]|شيك|صح[ةه] الجدول|هل الجدول|جود[ةه] الجدول|نسب[ةه] الجود[ةه]|منضبط|كفاء[ةه])/.test(
       n
     )
   ) {
@@ -193,14 +310,14 @@ export function answerSchoolQuestion(
   // 3. Days Off & Teacher Availability (استفسارات الإجازات والتفرغ)
   // -------------------------------------------------------------
   const isOffQuery =
-    /(اجازه|إجازة|اجازات|إجازات|اوف|أوف|تفرغ|مش شغال|ما يداوم|مابيداومش|مبيجيش|ما بيجيش|يرتاح|مين واخد|مين عنده|مين مابيداومش|مين مبيجيش)/.test(
+    /(اجاز[ةهت]|اجازات|اوف|أوف|تفرغ|مش شغال|ما يداوم|مابيداومش|مبيجيش|ما بيجيش|يرتاح|مين واخد|مين عنده|مين مابيداومش|مين مبيجيش)/.test(
       n
     ) ||
     (/(مين|من هم|هل)/.test(n) && /(الاحد|الأحد|الاتنين|الاثنين|الثلاثاء|التلات|الاربعاء|الأربعاء|الخميس)/.test(n));
 
   if (isOffQuery) {
-    const daysInMsg = parseDaysList(message);
-    const resolvedTch = resolveTeacherFromMessage(school, message).teacher;
+    const daysInMsg = ctxRes.days;
+    const resolvedTch = ctxRes.teacher;
 
     // A. Specific teacher's days off
     if (resolvedTch && daysInMsg.length === 0) {
@@ -329,7 +446,7 @@ export function answerSchoolQuestion(
       n
     )
   ) {
-    const resolvedTch = resolveTeacherFromMessage(school, message).teacher;
+    const resolvedTch = ctxRes.teacher;
 
     // A. Specific teacher's workload
     if (resolvedTch) {
@@ -426,27 +543,13 @@ export function answerSchoolQuestion(
     );
 
   if (isScheduleLookup) {
-    const daysInMsg = parseDaysList(message);
-    const resolvedTch = resolveTeacherFromMessage(school, message).teacher;
+    const daysInMsg = ctxRes.days;
+    const resolvedTch = ctxRes.teacher;
+    const resolvedSec = ctxRes.section;
 
-    // Check for section mention (e.g. "1/1", "1/2", "2/1", etc.)
-    const secMatch = message.match(/(\d+\s*[\/\\]\s*\d+)/);
-    let resolvedSec: Section | undefined;
-    if (secMatch) {
-      const code = secMatch[1].replace(/\s+/g, "");
-      resolvedSec = school.sections.find((s) => s.name === code || s.code === code);
-    }
-    if (!resolvedSec) {
-      for (const s of school.sections) {
-        if (normAr(message).includes(normAr(s.name))) {
-          resolvedSec = s;
-          break;
-        }
-      }
-    }
-
-    // A. Teacher's daily or weekly schedule
-    if (resolvedTch) {
+    // A. Teacher's daily or weekly schedule (skip if current message explicitly queries a section with no explicit teacher)
+    const hasExplicitSecInMsg = Boolean(findSectionInText(school, message));
+    if (resolvedTch && !(hasExplicitSecInMsg && ctxRes.usedTeacherFromContext)) {
       if (!schedule || !schedule.entries || schedule.entries.length === 0) {
         return {
           answered: true,
@@ -589,7 +692,7 @@ export function answerSchoolQuestion(
   // -------------------------------------------------------------
   // 7. Subject Specialists (مين بيدرس مادة كذا)
   // -------------------------------------------------------------
-  const subjectFound = findSubjectInMessage(school, message) || findMatchingSubjectInSchool(school.subjects, message);
+  const subjectFound = ctxRes.subject;
   if (subjectFound && /(مين بيدرس|مدرسين|معلمين|مدرسي|معلمي|مين ماسك)/.test(n)) {
     const asgs = school.assignments.filter((a) => a.subject_id === subjectFound.id);
     const teachersMap = new Map<string, { teacher: Teacher; sections: string[]; periods: number }>();

@@ -58,6 +58,7 @@ const ALLOWLIST_FILES: string[] = [
   "fixtures/demo_model_school.md",
   "fixtures/demo_two_shift_school.md",
   // Core services
+  "services/agentMemoryEngine.ts",
   "services/apiKeyManager.ts",
   "services/arabicRules.ts",
   "services/diffEngine.ts",
@@ -78,6 +79,7 @@ const ALLOWLIST_FILES: string[] = [
   "scripts/test_dialects_and_chat.ts",
   "scripts/test_moteer_integration.ts",
   "scripts/test_exports.ts",
+  "scripts/test_ai_agent_e2e_memory.ts",
   "scripts/build_clean_repo.ts",
 ];
 
