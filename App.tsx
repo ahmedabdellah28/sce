@@ -15,6 +15,10 @@ import {
   ALL_SCHOOL_PRESETS,
   getPresetById,
   createSchoolFromPreset,
+  getOrderedSchoolDays,
+  getSectionDayPeriods,
+  getDayMaxPeriods,
+  getTeacherDayPeriods,
   type SchoolPreset,
 } from "./presets/commonPresets.ts";
 import { generateSchoolMarkdown } from "./services/schoolCore.ts";
@@ -25,6 +29,7 @@ import {
   type TimetableDiffReport,
 } from "./services/diffEngine.ts";
 import TimetableDiffPreview from "./components/TimetableDiffPreview.tsx";
+import { JadwalLogo } from "./components/JadwalLogo.tsx";
 import TeacherManagementHub from "./components/TeacherManagementHub.tsx";
 import { DAY_NAMES_AR, type SchoolData, type Schedule, type AnalysisReport, type TimetableEntry } from "./types.ts";
 
@@ -128,7 +133,7 @@ export default function App() {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) return parsed;
       }
-    } catch {}
+    } catch { }
     const b376 = getBuiltInSchool376();
     const solved376 = InBrowserSchoolEngine.solveInBrowser(b376);
     return [
@@ -148,6 +153,7 @@ export default function App() {
     return activeId || "";
   });
   const [showAddSchoolModal, setShowAddSchoolModal] = useState(false);
+  const [showHeaderActionsMenu, setShowHeaderActionsMenu] = useState(false);
   const [newSchoolName, setNewSchoolName] = useState("");
   const [newSchoolType, setNewSchoolType] = useState<string>("preset");
   const [newSchoolPresetId, setNewSchoolPresetId] = useState<string>("preset_primary_gov_single");
@@ -366,21 +372,21 @@ export default function App() {
     const listToExport =
       school && !savedSchools.some((s) => s.id === school.id)
         ? [
-            {
-              id: school.id,
-              name: school.name,
-              school,
-              raw_text: rawText,
-              schedule,
-              analysis,
-            },
-            ...savedSchools,
-          ]
+          {
+            id: school.id,
+            name: school.name,
+            school,
+            raw_text: rawText,
+            schedule,
+            analysis,
+          },
+          ...savedSchools,
+        ]
         : savedSchools.map((s) =>
-            school && s.id === school.id
-              ? { ...s, school, raw_text: rawText, schedule, analysis }
-              : s
-          );
+          school && s.id === school.id
+            ? { ...s, school, raw_text: rawText, schedule, analysis }
+            : s
+        );
 
     InBrowserSchoolEngine.exportUserBackupJson({
       savedSchools: listToExport,
@@ -495,18 +501,11 @@ export default function App() {
   >([
     {
       role: "ai",
-      text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي المستقل (Autonomous School Timetable Agent).\n\nأدِر بيانات المدرسة مباشرة: اطلب مني إعطاء إجازة لمعلم، تعديل أنصبة الحصص، أو تثبيت حصص أولى وأخيرة، وسأقوم فوراً بتحديث وثيقة المدرسة (.md)، وتحديث هيكل البيانات، وإعادة إنشاء الجدول تلقائياً بضمان 0% تعارضات.",
+      text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي.\n\nأدِر بيانات المدرسة مباشرة: اطلب مني إعطاء إجازة لمعلم، تعديل أنصبة الحصص، أو تثبيت حصص أولى وأخيرة، وسأقوم فوراً بتحديث بيانات المدرسة وإعادة إنشاء الجدول تلقائياً بضمان 0% تعارضات.",
       timestamp: "الآن",
     },
   ]);
 
-  const [isLiveActive, setIsLiveActive] = useState(false);
-  const liveSessionRef = React.useRef<{
-    sendAudio: (b64: string) => void;
-    sendText: (t: string) => void;
-    close: () => void;
-  } | null>(null);
-  const audioContextRef = React.useRef<{ input?: AudioContext; output?: AudioContext } | null>(null);
 
   // RTL Layout: Collapsible & Resizable Right Chat Sidebar & Mobile Bottom Sheet
   const [chatWidth, setChatWidth] = useState<number>(() => {
@@ -525,19 +524,19 @@ export default function App() {
     }
   });
   // 3-Stage Floating Chat Bot: circle -> input_bar -> full_sheet
-  const [chatFabState, setChatFabState] = useState<"circle" | "input_bar" | "full_sheet">("circle");
+  const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
   const [mobileHeaderMenuOpen, setMobileHeaderMenuOpen] = useState(false);
   const [showMobileTableFilters, setShowMobileTableFilters] = useState(false);
   const chatBarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (chatFabState === "input_bar") {
+    if (isMobileSheetOpen) {
       const timer = setTimeout(() => {
         chatBarInputRef.current?.focus();
       }, 80);
       return () => clearTimeout(timer);
     }
-  }, [chatFabState]);
+  }, [isMobileSheetOpen]);
 
   const isResizingRef = useRef(false);
 
@@ -561,7 +560,7 @@ export default function App() {
       document.removeEventListener("mouseup", handleMouseUp);
       try {
         localStorage.setItem("AI_STUDIO_CHAT_WIDTH", String(chatWidth));
-      } catch {}
+      } catch { }
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -573,7 +572,7 @@ export default function App() {
       const next = !prev;
       try {
         localStorage.setItem("AI_STUDIO_CHAT_COLLAPSED", String(next));
-      } catch {}
+      } catch { }
       return next;
     });
   };
@@ -610,6 +609,7 @@ export default function App() {
     setLoading(true);
     setErrorMessage(null);
     try {
+      setTimetableDayFilter(null);
       setSelectedPreset(presetId);
       localStorage.setItem("AI_STUDIO_ACTIVE_SCHOOL_ID", presetId);
       const nowStr = new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
@@ -658,10 +658,10 @@ export default function App() {
       newSchoolType === "preset" && selectedPresetObj
         ? selectedPresetObj.label
         : newSchoolType === "secondary"
-        ? "مدرسة ثانوية جديدة"
-        : newSchoolType === "prep"
-        ? "مدرسة إعدادية جديدة"
-        : "مدرسة جديدة";
+          ? "مدرسة ثانوية جديدة"
+          : newSchoolType === "prep"
+            ? "مدرسة إعدادية جديدة"
+            : "مدرسة جديدة";
     const name = newSchoolName.trim() || defaultName;
 
     setLoading(true);
@@ -677,14 +677,19 @@ export default function App() {
         });
         createdRawText = generateSchoolMarkdown(createdSchool);
       } else if (newSchoolType === "ai" && newSchoolAiPrompt.trim()) {
-        setStatusMessage("جاري إنشاء وتوليد المدرسة بواسطة الذكاء الاصطناعي...");
+        setStatusMessage("جاري تحليل النص واستخراج بيانات المدرسة بالذكاء الاصطناعي...");
         const aiRes = await service.parseRawText(newSchoolAiPrompt);
+        const explicitName = newSchoolName.trim();
+        const extractedName = aiRes.school?.name && aiRes.school.name !== "مدرسة جديدة" ? aiRes.school.name : "";
         createdSchool = {
           ...aiRes.school,
           id: "sch_" + Date.now().toString(36),
-          name: name || aiRes.school.name || "مدرسة جديدة",
+          name: explicitName || extractedName || "مدرسة جديدة",
         };
-        createdRawText = newSchoolAiPrompt;
+        createdRawText =
+          createdSchool.assignments && createdSchool.assignments.length > 0
+            ? generateSchoolMarkdown(createdSchool)
+            : newSchoolAiPrompt;
       } else if (newSchoolType === "blank") {
         const res = createBlankSchoolTemplate(name, newSchoolPeriods);
         createdSchool = res.school;
@@ -716,6 +721,7 @@ export default function App() {
       setSavedSchools(updatedSaved);
       localStorage.setItem("AI_STUDIO_SAVED_SCHOOLS_V2", JSON.stringify(updatedSaved));
 
+      setTimetableDayFilter(null);
       setSelectedPreset(createdSchool.id);
       setSchool(createdSchool);
       setRawText(createdRawText);
@@ -730,8 +736,8 @@ export default function App() {
       setShowAddSchoolModal(false);
       setNewSchoolName("");
       setNewSchoolAiPrompt("");
-      setStatusMessage(`تم إنشاء "${createdSchool.name}" بنجاح! يمكنك الآن تعديل قيودها أو إنشاء جدولها مباشرة.`);
-      setActiveTab("ingest");
+      setStatusMessage(`تم إنشاء "${createdSchool.name}" بنجاح (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${createdSchool.assignments.length} تكليف)! يمكنك مراجعة الإسناد أو توليد الجدول مباشرة.`);
+      setActiveTab(createdSchool.assignments.length > 0 ? "constraints" : "wizard");
 
       setChatHistory((prev) => [
         ...prev,
@@ -821,7 +827,7 @@ export default function App() {
         setSelectedConstraintTeacherId(res.school.teachers[0].id);
       }
       setStatusMessage(res.explanation);
-      setActiveTab("analyze");
+      setActiveTab("wizard");
     } catch (e: any) {
       setErrorMessage(e.message);
     } finally {
@@ -863,7 +869,7 @@ export default function App() {
     const msg = (customPrompt ?? chatInput).trim();
     if (!msg) return;
     if (!customPrompt) setChatInput("");
-    setChatFabState("full_sheet");
+    if (typeof window !== "undefined" && window.innerWidth < 1024) setIsMobileSheetOpen(true);
     const activeSchool = school || createBlankSchoolTemplate("مدرسة جديدة", 7).school;
     const activeRawText = rawText || createBlankSchoolTemplate("مدرسة جديدة", 7).raw_text;
     const nowTime = new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
@@ -907,12 +913,30 @@ export default function App() {
       ]);
       if (res.should_solve && targetSchool) {
         setChatLoadingStep(3);
+        const isExplicitRefresh = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء|حل|وزع|سو جدول)\s*(?:ل)?(?:ال)?جدول/.test(msg.trim());
+        const structureChanged =
+          targetSchool.periods_per_day !== activeSchool.periods_per_day ||
+          JSON.stringify(targetSchool.days) !== JSON.stringify(activeSchool.days) ||
+          JSON.stringify(targetSchool.sections.map((s) => s.daily_period_limits || null)) !==
+            JSON.stringify(activeSchool.sections.map((s) => s.daily_period_limits || null));
         const diffReport = dryRunMinimalChange(activeSchool, schedule, targetSchool);
-        setPendingDiff(diffReport);
-        setActiveTab("timetable");
-        setStatusMessage(
-          `تم احتساب التعديلات بأقل تغيير بنجاح! تم الحفاظ على ${diffReport.unchanged_count} حصة ثابتة، و ${diffReport.total_changes} حصة معدلة معروضة للمعاينة.`
-        );
+        if (!schedule || isExplicitRefresh || structureChanged || !diffReport.has_changes) {
+          const solved = InBrowserSchoolEngine.solveInBrowser(targetSchool);
+          setSchedule(solved.schedule);
+          setValidation(solved.validation);
+          setMetrics(solved.metrics);
+          setPendingDiff(null);
+          setLastUpdatedTime(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }));
+          persistSchoolData(targetSchool, res.updated_markdown || rawText, solved.schedule, res.analysis || analysis);
+          setActiveTab("timetable");
+          setStatusMessage(`تم تحديث وبناء الجدول بنجاح (${solved.schedule.entries.length} حصة · 0% تعارضات)!`);
+        } else {
+          setPendingDiff(diffReport);
+          setActiveTab("timetable");
+          setStatusMessage(
+            `تم احتساب التعديلات بأقل تغيير بنجاح! تم الحفاظ على ${diffReport.unchanged_count} حصة ثابتة، و ${diffReport.total_changes} حصة معدلة معروضة للمعاينة.`
+          );
+        }
       } else if (targetSchool) {
         persistSchoolData(targetSchool, res.updated_markdown || rawText, schedule, res.analysis || analysis);
       }
@@ -934,112 +958,6 @@ export default function App() {
     }
   }
 
-  async function toggleLiveVoice() {
-    if (isLiveActive) {
-      liveSessionRef.current?.close();
-      liveSessionRef.current = null;
-      if (audioContextRef.current?.input) audioContextRef.current.input.close().catch(() => {});
-      if (audioContextRef.current?.output) audioContextRef.current.output.close().catch(() => {});
-      audioContextRef.current = null;
-      setIsLiveActive(false);
-      setChatHistory((prev) => [
-        ...prev,
-        { role: "ai", text: "تم إنهاء جلسة المحادثة الصوتية المباشرة (Gemini Live API)." },
-      ]);
-      return;
-    }
-
-    try {
-      const outputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({
-        sampleRate: 24000,
-      });
-      let nextStartTime = outputAudioCtx.currentTime;
-
-      function playAudioChunk(base64Data: string) {
-        try {
-          const binaryString = atob(base64Data);
-          const len = binaryString.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-          const pcm16 = new Int16Array(bytes.buffer);
-          const float32 = new Float32Array(pcm16.length);
-          for (let i = 0; i < pcm16.length; i++) {
-            float32[i] = pcm16[i] / 32768.0;
-          }
-          const buffer = outputAudioCtx.createBuffer(1, float32.length, 24000);
-          buffer.copyToChannel(float32, 0);
-          const source = outputAudioCtx.createBufferSource();
-          source.buffer = buffer;
-          source.connect(outputAudioCtx.destination);
-          const startTime = Math.max(outputAudioCtx.currentTime, nextStartTime);
-          source.start(startTime);
-          nextStartTime = startTime + buffer.duration;
-        } catch (e) {
-          console.warn("Playback error:", e);
-        }
-      }
-
-      const session = service.connectLiveSession({
-        onOpen: () => {
-          setIsLiveActive(true);
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              role: "ai",
-              text: "🎙️ بدأت المحادثة الصوتية المباشرة مع Gemini Live API! تحدث الآن عبر الميكروفون.",
-            },
-          ]);
-        },
-        onAudioChunk: (b64) => {
-          playAudioChunk(b64);
-        },
-        onInterrupted: () => {
-          nextStartTime = outputAudioCtx.currentTime;
-        },
-        onError: (err) => {
-          console.warn("Live error:", err);
-          setIsLiveActive(false);
-        },
-        onClose: () => {
-          setIsLiveActive(false);
-        },
-      });
-      liveSessionRef.current = session;
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const inputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({
-        sampleRate: 16000,
-      });
-      const sourceNode = inputAudioCtx.createMediaStreamSource(stream);
-      const processor = inputAudioCtx.createScriptProcessor(4096, 1, 1);
-
-      processor.onaudioprocess = (e) => {
-        if (!liveSessionRef.current) return;
-        const channelData = e.inputBuffer.getChannelData(0);
-        const pcm16 = new Int16Array(channelData.length);
-        for (let i = 0; i < channelData.length; i++) {
-          const s = Math.max(-1, Math.min(1, channelData[i]));
-          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-        }
-        const bytes = new Uint8Array(pcm16.buffer);
-        let binary = "";
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64 = btoa(binary);
-        session.sendAudio(base64);
-      };
-
-      sourceNode.connect(processor);
-      processor.connect(inputAudioCtx.destination);
-      audioContextRef.current = { input: inputAudioCtx, output: outputAudioCtx };
-    } catch (err: any) {
-      setErrorMessage("تعذر بدء جلسة الصوت: " + (err.message || String(err)));
-      setIsLiveActive(false);
-    }
-  }
 
   function toggleTeacherDayOff(teacherId: string, day: number) {
     if (!school) return;
@@ -1186,60 +1104,54 @@ export default function App() {
   );
 
   const renderChatPanelContent = (isMobile: boolean = false) => (
-    <div className="bg-white rounded-2xl border border-slate-300 shadow-sm flex flex-col h-full overflow-hidden">
-      {/* Fixed Header */}
-      <div className="bg-slate-900 text-white p-3.5 rounded-t-2xl flex items-center justify-between shrink-0 border-b border-slate-800">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-base shadow-xs shrink-0">
-            🤖
+    <div className="bg-[#FFFFFF] rounded-2xl border border-[#E7E5E4] shadow-sm flex flex-col h-full overflow-hidden">
+      {/* Fixed Header (Responsive min-w-0 prevents clipping at 390px) */}
+      <div className="bg-[#1C1917] text-white p-3 rounded-t-2xl flex items-center justify-between gap-2 shrink-0 border-b border-stone-800">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div
+            className="w-8 h-8 rounded-xl bg-[#EDE9FE] text-[#8B5CF6] border border-[#8B5CF6]/40 flex items-center justify-center shadow-xs shrink-0"
+            aria-hidden="true"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0">
               <h3 className="font-extrabold text-xs tracking-tight text-white truncate">وكيل الجداول الذكي</h3>
-              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-bold px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
+              <span className="text-[10px] bg-[#CCFBF1] text-[#0F766E] font-bold px-1.5 py-0.5 rounded border border-[#14B8A6] shrink-0">
                 نشط
               </span>
             </div>
-            <p className="text-[10px] text-slate-400 mt-0.5 font-medium truncate">تعديل القيود والإجازات بالعامية المصرية والخليجية</p>
+            <p className="text-[11px] text-stone-300 mt-0.5 font-medium truncate">تعديل القيود بالعامية المصرية والخليجية</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={() =>
               setChatHistory([
                 {
                   role: "ai",
-                  text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي المستقل.\n\nيمكنك طلب تعديل أي قيد أو إجازة لمعلم أو تبديل حصص بالعامية المصرية أو الخليجية وسأقوم بتحديث الوثيقة وحل الجدول تلقائياً بضمان 0% تعارضات.",
+                  text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي.\n\nيمكنك طلب تعديل أي قيد أو إجازة لمعلم أو تبديل حصص بالعامية المصرية أو الخليجية وسأقوم بتحديث الجدول تلقائياً بضمان 0% تعارضات.",
                 },
               ])
             }
-            className="text-[11px] text-slate-300 hover:text-white px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
+            className="text-[11px] text-stone-200 hover:text-white px-2 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 transition cursor-pointer"
             title="مسح سجل المحادثة والبدء من جديد"
+            aria-label="مسح المحادثة"
           >
-            🗑️ مسح
-          </button>
-
-          <button
-            type="button"
-            onClick={toggleLiveVoice}
-            className={`text-xs px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-colors ${
-              isLiveActive
-                ? "bg-rose-500 text-white animate-pulse"
-                : "bg-slate-800 hover:bg-slate-700 text-slate-200"
-            }`}
-            title={isLiveActive ? "إنهاء المحادثة الصوتية المباشرة" : "بدء محادثة صوتية مباشرة (Gemini Live API تجريبي)"}
-          >
-            🎙️ {isLiveActive ? "متصل..." : "صوتي (تجريبي)"}
+            مسح
           </button>
 
           {isMobile ? (
             <button
               type="button"
-              onClick={() => setChatFabState("circle")}
-              className="text-xs text-slate-300 hover:text-white px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition font-bold"
+              onClick={() => setIsMobileSheetOpen(false)}
+              className="text-xs text-stone-200 hover:text-white px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 transition font-bold cursor-pointer"
               title="طي المحادثة"
+              aria-label="إغلاق لوحة المحادثة"
             >
               ✕ طي
             </button>
@@ -1247,8 +1159,9 @@ export default function App() {
             <button
               type="button"
               onClick={toggleChatCollapse}
-              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition text-xs font-bold"
+              className="text-stone-300 hover:text-white p-1.5 rounded-lg hover:bg-stone-800 transition text-xs font-bold cursor-pointer"
               title="طي لوحة الشات إلى شريط جانبي"
+              aria-label="طي لوحة الشات"
             >
               ⇤
             </button>
@@ -1257,32 +1170,43 @@ export default function App() {
       </div>
 
       {/* Messages Area - Internal Scroll Only with WCAG AA Contrast */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3 bg-slate-50/40">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3 bg-[#FAFAF9]">
         {chatHistory.map((item, idx) => (
           <div
             key={idx}
-            className={`p-3.5 rounded-2xl text-xs whitespace-pre-wrap transition-all shadow-xs ${
-              item.role === "user"
-                ? "bg-blue-600 text-white ms-auto max-w-[85%]"
-                : "bg-white text-slate-900 border border-slate-300 me-auto max-w-[92%]"
-            }`}
+            className={`p-3.5 rounded-2xl text-xs whitespace-pre-wrap transition-all shadow-xs ${item.role === "user"
+              ? "bg-[#0F766E] text-white ms-auto max-w-[85%]"
+              : "bg-[#FFFFFF] text-[#1C1917] border border-[#E7E5E4] me-auto max-w-[92%]"
+              }`}
           >
-            <div className="flex items-center justify-between mb-1.5 opacity-80 text-[10px] font-bold">
-              <span className="flex items-center gap-1">
-                {item.role === "user" ? "👤 طلبك" : "🤖 وكيل الجداول الذكي"}
+            <div className="flex items-center justify-between mb-1.5 text-[11px] font-bold">
+              <span
+                className={`flex items-center gap-1.5 ${item.role === "user" ? "text-[#CCFBF1]" : "text-[#6D28D9]"
+                  }`}
+              >
+                {item.role === "ai" && (
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-[#EDE9FE] text-[#8B5CF6]" aria-hidden="true">
+                    ✦
+                  </span>
+                )}
+                <span>{item.role === "user" ? "طلبك" : "وكيل الجداول الذكي"}</span>
               </span>
-              {item.timestamp && <span>{item.timestamp}</span>}
+              {item.timestamp && (
+                <span className={item.role === "user" ? "text-[#CCFBF1]" : "text-[#57534E]"}>
+                  {item.timestamp}
+                </span>
+              )}
             </div>
 
             <div className="leading-relaxed font-medium">{item.text}</div>
 
             {item.changes && item.changes.length > 0 && (
-              <div className="mt-2.5 pt-2 border-t border-slate-200 space-y-1">
-                <span className="text-[10px] text-emerald-800 font-extrabold flex items-center gap-1">
-                  <span>✅</span>
+              <div className="mt-2.5 pt-2 border-t border-[#E7E5E4] space-y-1 bg-[#CCFBF1]/35 p-2 rounded-xl border border-[#14B8A6]/40">
+                <span className="text-[11px] text-[#0F766E] font-extrabold flex items-center gap-1">
+                  <span>✓</span>
                   <span>العمليات المنفذة بنجاح:</span>
                 </span>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-700 ps-1">
+                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-[#1C1917] ps-1">
                   {item.changes.map((c, cIdx) => (
                     <li key={cIdx}>{c}</li>
                   ))}
@@ -1291,14 +1215,14 @@ export default function App() {
             )}
 
             {item.isError && item.retryPrompt && (
-              <div className="mt-2 pt-2 border-t border-rose-200 flex items-center justify-between">
-                <span className="text-[10px] text-rose-700 font-bold">تعذر إكمال العملية</span>
+              <div className="mt-2 pt-2 border-t border-[#FB7185] bg-[#FFF1F2] p-2 rounded-xl flex items-center justify-between gap-2">
+                <span className="text-[11px] text-[#BE123C] font-bold">تعذر إكمال العملية</span>
                 <button
                   type="button"
                   onClick={() => handleSendChat(item.retryPrompt)}
-                  className="bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg transition"
+                  className="bg-[#BE123C] hover:bg-[#9F1239] text-white text-[11px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer"
                 >
-                  إعادة المحاولة 🔄
+                  إعادة المحاولة
                 </button>
               </div>
             )}
@@ -1307,26 +1231,26 @@ export default function App() {
 
         {/* Multi-Step Animated Loading Indicator */}
         {isChatSubmitting && (
-          <div className="p-3.5 rounded-2xl text-xs bg-white text-slate-900 me-auto max-w-[92%] border border-blue-300 shadow-sm space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs animate-spin">
-                  ⚙️
+          <div className="p-3.5 rounded-2xl text-xs bg-[#FFFFFF] text-[#1C1917] me-auto max-w-[92%] border border-[#8B5CF6]/50 shadow-sm space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-5 h-5 rounded-full bg-[#EDE9FE] text-[#8B5CF6] flex items-center justify-center text-xs motion-safe:animate-spin shrink-0">
+                  ✦
                 </div>
-                <span className="font-extrabold text-blue-950 text-xs">جاري التفكير وتحليل بيانات المدرسة والجدول...</span>
+                <span className="font-extrabold text-[#6D28D9] text-xs truncate">جاري التحليل وتنفيذ التعديلات...</span>
               </div>
-              <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+              <span className="text-[11px] font-bold text-[#6D28D9] bg-[#EDE9FE] px-2 py-0.5 rounded-full shrink-0">
                 {chatLoadingStep === 1
-                  ? "1 / 3 فهم واستعلام"
+                  ? "1 / 3 فهم"
                   : chatLoadingStep === 2
-                  ? "2 / 3 صياغة الرد"
-                  : "3 / 3 حل وتوزيع"}
+                    ? "2 / 3 صياغة"
+                    : "3 / 3 توزيع"}
               </span>
             </div>
 
-            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+            <div className="w-full bg-[#E7E5E4] h-1.5 rounded-full overflow-hidden">
               <div
-                className="bg-gradient-to-r from-blue-600 to-indigo-600 h-full transition-all duration-500 rounded-full"
+                className="bg-[#8B5CF6] h-full transition-all duration-500 rounded-full"
                 style={{
                   width: chatLoadingStep === 1 ? "35%" : chatLoadingStep === 2 ? "70%" : "95%",
                 }}
@@ -1334,16 +1258,16 @@ export default function App() {
             </div>
 
             <div className="space-y-1 text-[11px]">
-              <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 1 ? "text-blue-950 font-bold" : "text-slate-400"}`}>
-                <span>{chatLoadingStep > 1 ? "✅" : "🔍"}</span>
+              <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 1 ? "text-[#1C1917] font-bold" : "text-[#57534E]"}`}>
+                <span>{chatLoadingStep > 1 ? "✓" : "•"}</span>
                 <span>فحص السؤال والاطلاع على المعلمين والفصول والأنصبة</span>
               </div>
-              <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 2 ? "text-indigo-950 font-bold" : "text-slate-400"}`}>
-                <span>{chatLoadingStep > 2 ? "✅" : chatLoadingStep === 2 ? "⏳" : "📝"}</span>
-                <span>صياغة الرد الشامل وتحديث وثيقة المدرسة إن وُجد تعديل</span>
+              <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 2 ? "text-[#6D28D9] font-bold" : "text-[#57534E]"}`}>
+                <span>{chatLoadingStep > 2 ? "✓" : chatLoadingStep === 2 ? "⏳" : "•"}</span>
+                <span>تحديث بيانات المدرسة وصياغة الرد</span>
               </div>
-              <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 3 ? "text-emerald-950 font-bold" : "text-slate-400"}`}>
-                <span>{chatLoadingStep === 3 ? "⚙️" : "📊"}</span>
+              <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 3 ? "text-[#0F766E] font-bold" : "text-[#57534E]"}`}>
+                <span>{chatLoadingStep === 3 ? "⚡" : "•"}</span>
                 <span>حل الجدول وتوزيع الحصص بضمان 0% تعارضات</span>
               </div>
             </div>
@@ -1352,25 +1276,24 @@ export default function App() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Clean Conversational Input Area at Bottom (Without Quick Chips) */}
-      <div className="p-3 border-t border-slate-200 bg-white shrink-0">
+      {/* Clean Conversational Input Area at Bottom */}
+      <div className="p-3 border-t border-[#E7E5E4] bg-[#FFFFFF] shrink-0">
         <div className="flex gap-2">
           <input
             type="text"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSendChat()}
-            placeholder="اسأل عن أي شيء يخص المدرسة والجدول، أو اطلب تعديلاً..."
-            className="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none placeholder:text-slate-400 bg-white"
+            placeholder="اطلب تعديلاً أو اسأل عن الجدول..."
+            className="flex-1 min-w-0 border border-[#D6D3D1] rounded-xl px-3 py-2 text-xs font-bold text-[#1C1917] focus:ring-2 focus:ring-[#0F766E] focus:outline-none placeholder:text-[#57534E] bg-[#FFFFFF]"
           />
           <button
             type="button"
             onClick={() => handleSendChat()}
             disabled={loading || !chatInput.trim()}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-extrabold px-4 py-2 rounded-xl text-xs shadow-xs transition flex items-center gap-1.5 shrink-0"
+            className="min-h-[38px] bg-[#0F766E] hover:bg-[#115E59] disabled:opacity-50 text-white font-extrabold px-4 py-2 rounded-xl text-xs shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
           >
             <span>إرسال</span>
-            <span>🚀</span>
           </button>
         </div>
       </div>
@@ -1378,64 +1301,57 @@ export default function App() {
   );
 
   return (
-    <div dir="rtl" className="min-h-screen bg-slate-100 text-slate-900 font-sans">
-      {/* Header */}
-      <header className="bg-slate-900 text-white px-4 sm:px-6 py-3 sm:py-3.5 shadow-lg flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4">
-        <div>
-          <h1 className="text-base sm:text-lg font-extrabold flex items-center gap-2">
-            <span>🗓️</span>
-            <span>المنظومة الذكية للجداول المدرسية</span>
-          </h1>
-          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
-            توليد جداول متوازنة خالية من التعارضات بالاستمثال والذكاء الاصطناعي
-          </p>
-        </div>
+    <div dir="rtl" className="min-h-screen bg-[#FAFAF9] text-[#1C1917]">
+      {/* Executive SaaS Header with Live Pulsing Status Indicator */}
+      <header className="sticky top-0 z-30 bg-[#FFFFFF] text-[#1C1917] border-t-[3px] border-t-[#0F766E] border-b border-[#E7E5E4] shadow-2xs px-4 sm:px-6 py-2.5">
+        <div className="max-w-[1850px] mx-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5">
+          {/* Typographic Wordmark Logo (جدول AI / JADWAL) + Live Pulsing Dot */}
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <JadwalLogo />
 
-        {/* Responsive Header Toolbar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
-          {/* Mobile-only Top Action Strip: School Selector + Save + More Menu */}
-          <div className="flex items-center gap-1.5 w-full sm:hidden">
-            <select
-              value={selectedPreset}
-              onChange={(e) => handleLoadPreset(e.target.value)}
-              className="bg-slate-800 border border-slate-700 text-white rounded-xl px-2.5 py-1.5 text-xs font-bold shadow-inner focus:ring-2 focus:ring-blue-400 focus:outline-none flex-1 truncate"
-              title="التبديل بين المدارس المحفوظة"
-            >
-              {allSchoolsList.length === 0 ? (
-                <option value="">(لا توجد مدارس)</option>
-              ) : (
-                allSchoolsList.map((p) => (
-                  <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                    {p.name}
-                  </option>
-                ))
-              )}
-            </select>
+              {/* Pulsing Live Status Dot inside Header */}
+              <span
+                className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-[#0F766E] bg-[#CCFBF1]/70 border border-[#14B8A6]/45 px-2.5 py-1 rounded-full tabular-nums shrink-0"
+                title={`تحديث الجدول متاح تلقائياً وعند الطلب · آخر تحديث: ${lastUpdatedTime}`}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-[#14B8A6] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[#0F766E]"></span>
+                </span>
+                <span>{loading ? "جاري التحديث..." : lastUpdatedTime}</span>
+              </span>
+            </div>
 
-            {school && (
+            {/* Mobile Menu Toggle */}
+            <div className="flex items-center gap-1.5 sm:hidden shrink-0">
               <button
                 type="button"
-                onClick={handleSaveCurrentSchool}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-xl shadow-xs transition shrink-0"
-                title="حفظ بيانات المدرسة والجدول"
+                onClick={() => setMobileHeaderMenuOpen(!mobileHeaderMenuOpen)}
+                className="bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[#E7E5E4] transition cursor-pointer"
+                title="خيارات المدرسة والمفاتيح"
               >
-                💾 حفظ
+                {mobileHeaderMenuOpen ? "✕" : "القائمة"}
               </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setMobileHeaderMenuOpen(!mobileHeaderMenuOpen)}
-              className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-xl border border-slate-700 shadow-xs transition shrink-0"
-              title="خيارات المدرسة والمفاتيح"
-            >
-              {mobileHeaderMenuOpen ? "✕" : "⚙️ المزيد"}
-            </button>
+            </div>
           </div>
 
           {/* Mobile Dropdown Menu */}
           {mobileHeaderMenuOpen && (
-            <div className="sm:hidden bg-slate-800 rounded-2xl border border-slate-700 p-2.5 space-y-1.5 shadow-2xl animate-in fade-in duration-150">
+            <div className="sm:hidden bg-[#FAFAF9] rounded-xl border border-[#E7E5E4] p-2.5 space-y-2">
+              <select
+                value={selectedPreset}
+                onChange={(e) => handleLoadPreset(e.target.value)}
+                className="w-full bg-white border border-[#E7E5E4] text-[#1C1917] rounded-lg px-2.5 py-1.5 text-xs font-bold"
+              >
+                {allSchoolsList.length === 0 ? (
+                  <option value="">(لا توجد مدارس)</option>
+                ) : (
+                  allSchoolsList.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))
+                )}
+              </select>
               <div className="grid grid-cols-2 gap-1.5 text-xs">
                 <button
                   type="button"
@@ -1443,54 +1359,22 @@ export default function App() {
                     setShowAddSchoolModal(true);
                     setMobileHeaderMenuOpen(false);
                   }}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold p-2 rounded-xl text-center transition"
+                  className="bg-[#0F766E] text-white font-bold p-2 rounded-lg text-center"
                 >
-                  ➕ مدرسة جديدة
+                  + مدرسة جديدة
                 </button>
                 {school && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleDuplicateSchool();
-                        setMobileHeaderMenuOpen(false);
-                      }}
-                      className="bg-slate-700 hover:bg-slate-600 text-white font-bold p-2 rounded-xl text-center transition"
-                    >
-                      📋 نسخ المدرسة
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleDeleteSchool(selectedPreset);
-                        setMobileHeaderMenuOpen(false);
-                      }}
-                      className="bg-rose-900/70 hover:bg-rose-800 text-rose-200 p-2 rounded-xl text-center transition"
-                    >
-                      🗑️ حذف المدرسة
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSaveCurrentSchool();
+                      setMobileHeaderMenuOpen(false);
+                    }}
+                    className="bg-white border border-[#E7E5E4] text-[#1C1917] font-bold p-2 rounded-lg text-center"
+                  >
+                    حفظ
+                  </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleExportBackupJson();
-                    setMobileHeaderMenuOpen(false);
-                  }}
-                  className="bg-indigo-700 hover:bg-indigo-600 text-white font-bold p-2 rounded-xl text-center transition"
-                >
-                  📤 تصدير JSON
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    backupFileInputRef.current?.click();
-                    setMobileHeaderMenuOpen(false);
-                  }}
-                  className="bg-teal-700 hover:bg-teal-600 text-white font-bold p-2 rounded-xl text-center transition"
-                >
-                  📥 استيراد JSON
-                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -1498,134 +1382,170 @@ export default function App() {
                     setShowKeyManagerModal(true);
                     setMobileHeaderMenuOpen(false);
                   }}
-                  className="bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 font-bold p-2 rounded-xl text-center border border-amber-500/30 transition col-span-2"
+                  className="bg-[#EDE9FE] text-[#6D28D9] font-bold p-2 rounded-lg text-center col-span-2"
                 >
-                  🔑 إدارة مفاتيح Gemini ({userKeys.filter((k) => k.enabled).length} مفعل)
+                  المفاتيح ({userKeys.filter((k) => k.enabled).length})
                 </button>
               </div>
             </div>
           )}
 
-          {/* Desktop & Tablet Toolbar (Clean Single Row) */}
-          <div className="hidden sm:flex flex-wrap items-center gap-1 bg-slate-800/90 border border-slate-700 rounded-xl p-1 shadow-inner">
-            <span className="text-xs px-1 text-slate-300">🏫</span>
-            <select
-              value={selectedPreset}
-              onChange={(e) => handleLoadPreset(e.target.value)}
-              className="bg-slate-900 border border-slate-600 text-white rounded-lg px-2 py-1 text-xs font-bold shadow-inner focus:ring-2 focus:ring-blue-400 focus:outline-none min-w-[130px] max-w-[190px] truncate"
-              title="التبديل بين المدارس المحفوظة"
-            >
-              {allSchoolsList.length === 0 ? (
-                <option value="">(لا توجد مدارس)</option>
-              ) : (
-                allSchoolsList.map((p) => (
-                  <option key={p.id} value={p.id} className="bg-slate-900 text-white">
-                    {p.name}
-                  </option>
-                ))
-              )}
-            </select>
+          {/* Desktop & Tablet Unified Action Strip */}
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+            {/* Active School Selector & Primary School Actions */}
+            <div className="hidden sm:flex items-center gap-1 bg-[#FAFAF9] border border-[#E7E5E4] rounded-xl p-1 relative">
+              <select
+                value={selectedPreset}
+                onChange={(e) => handleLoadPreset(e.target.value)}
+                className="bg-white border border-[#E7E5E4] text-[#1C1917] rounded-lg px-2.5 py-1.5 text-xs font-extrabold focus:ring-2 focus:ring-[#0F766E] focus:outline-none min-w-[155px] max-w-[215px] truncate cursor-pointer"
+                title="التبديل بين المدارس المحفوظة"
+                aria-label="اختيار المدرسة النشطة"
+              >
+                {allSchoolsList.length === 0 ? (
+                  <option value="">(لا توجد مدارس)</option>
+                ) : (
+                  allSchoolsList.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))
+                )}
+              </select>
 
-            <button
-              type="button"
-              onClick={() => setShowAddSchoolModal(true)}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-2 py-1 rounded-lg shadow-xs flex items-center gap-1 transition cursor-pointer"
-              title="إضافة مدرسة جديدة"
-            >
-              <span>➕</span>
-              <span>مدرسة</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setShowAddSchoolModal(true)}
+                className="bg-[#CCFBF1] hover:bg-[#99F6E4] text-[#0F766E] border border-[#14B8A6]/40 font-extrabold text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                title="إضافة مدرسة جديدة"
+              >
+                <span>+</span>
+                <span>مدرسة</span>
+              </button>
 
-            {school && (
-              <>
+              {school && (
                 <button
                   type="button"
                   onClick={handleSaveCurrentSchool}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-2 py-1 rounded-lg shadow-xs flex items-center gap-1 transition cursor-pointer"
+                  className="bg-white hover:bg-[#E7E5E4]/60 text-[#1C1917] border border-[#E7E5E4] font-bold text-xs px-2.5 py-1.5 rounded-lg transition cursor-pointer"
                   title="حفظ بيانات المدرسة والجدول بالمتصفح"
                 >
-                  <span>💾</span>
-                  <span>حفظ</span>
+                  حفظ
                 </button>
+              )}
 
-                <button
-                  type="button"
-                  onClick={handleDuplicateSchool}
-                  className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold text-xs px-2 py-1 rounded-lg border border-slate-600 flex items-center gap-1 transition cursor-pointer"
-                  title="نسخ المدرسة الحالية كمسودة جديدة"
-                >
-                  <span>📋</span>
-                  <span>نسخ</span>
-                </button>
+              <button
+                type="button"
+                onClick={() => setShowHeaderActionsMenu((prev) => !prev)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${showHeaderActionsMenu
+                  ? "bg-[#1C1917] text-white border-[#1C1917]"
+                  : "bg-white hover:bg-[#E7E5E4]/60 text-[#57534E] border-[#E7E5E4]"
+                  }`}
+                title="إجراءات إضافية (نسخ، حذف، نسخ احتياطي JSON)"
+              >
+                المزيد ▾
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleDeleteSchool(selectedPreset)}
-                  className="bg-rose-900/60 hover:bg-rose-800 text-rose-200 hover:text-white font-bold text-xs px-2 py-1 rounded-lg border border-rose-700/60 shadow-xs flex items-center gap-1 transition cursor-pointer"
-                  title="حذف المدرسة الحالية"
-                >
-                  <span>🗑️</span>
-                  <span>حذف</span>
-                </button>
-              </>
-            )}
+              {showHeaderActionsMenu && (
+                <div className="absolute top-full end-0 mt-1.5 w-48 bg-white rounded-xl border border-[#E7E5E4] shadow-lg p-1.5 z-50 space-y-0.5 text-xs">
+                  {school && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleDuplicateSchool();
+                        setShowHeaderActionsMenu(false);
+                      }}
+                      className="w-full text-start px-3 py-2 rounded-lg font-bold text-[#1C1917] hover:bg-[#FAFAF9] transition cursor-pointer"
+                    >
+                      نسخ المدرسة الحالية
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleExportBackupJson();
+                      setShowHeaderActionsMenu(false);
+                    }}
+                    className="w-full text-start px-3 py-2 rounded-lg font-bold text-[#1C1917] hover:bg-[#FAFAF9] transition cursor-pointer"
+                  >
+                    تصدير نسخة JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      backupFileInputRef.current?.click();
+                      setShowHeaderActionsMenu(false);
+                    }}
+                    className="w-full text-start px-3 py-2 rounded-lg font-bold text-[#1C1917] hover:bg-[#FAFAF9] transition cursor-pointer"
+                  >
+                    استيراد نسخة JSON
+                  </button>
+                  {school && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleDeleteSchool(selectedPreset);
+                        setShowHeaderActionsMenu(false);
+                      }}
+                      className="w-full text-start px-3 py-2 rounded-lg font-bold text-[#BE123C] hover:bg-[#FFF1F2] transition cursor-pointer"
+                    >
+                      حذف المدرسة
+                    </button>
+                  )}
+                </div>
+              )}
+              <input
+                ref={backupFileInputRef}
+                type="file"
+                accept=".json,application/json"
+                onChange={handleImportBackupJsonFile}
+                className="hidden"
+              />
+            </div>
 
-            <button
-              type="button"
-              onClick={handleExportBackupJson}
-              className="bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs px-2 py-1 rounded-lg border border-indigo-500/60 shadow-xs flex items-center gap-1 transition cursor-pointer"
-              title="تصدير نسخة احتياطية JSON"
+            {/* Creator WhatsApp Contact */}
+            <a
+              href="https://wa.me/201039659917"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden md:inline-flex items-center gap-1.5 bg-[#CCFBF1]/60 hover:bg-[#CCFBF1] text-[#0F766E] border border-[#14B8A6]/40 font-bold text-xs px-2.5 py-2 rounded-xl transition shrink-0"
+              title="التواصل مع منشئ المشروع عبر واتساب: 01039659917"
             >
-              <span>📤</span>
-              <span>تصدير</span>
-            </button>
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12.031 2c-5.516 0-9.969 4.453-9.969 9.969 0 1.766.469 3.484 1.344 5l-1.406 5.156 5.281-1.375c1.469.797 3.109 1.219 4.75 1.219 5.516 0 9.969-4.453 9.969-9.969s-4.453-10-9.969-10zm5.828 14.125c-.25.703-1.438 1.344-1.984 1.422-.531.078-1.203.109-1.938-.125-.453-.141-1.031-.344-1.766-.656-3.094-1.328-5.109-4.453-5.266-4.656-.156-.203-1.266-1.688-1.266-3.219s.797-2.281 1.078-2.594c.281-.313.625-.391.828-.391.203 0 .406.016.594.016.188 0 .453-.078.703.531.25.609.859 2.094.938 2.25.078.156.125.344.031.547-.094.203-.141.328-.281.5-.141.172-.297.391-.422.516-.141.141-.281.297-.125.578.156.281.703 1.156 1.516 1.875 1.047.922 1.922 1.219 2.203 1.359.281.141.438.109.609-.078.172-.188.703-.828.891-1.109.188-.281.375-.234.625-.141.25.094 1.609.75 1.891.891.281.141.469.203.531.328.063.125.063.719-.188 1.422z" />
+              </svg>
+              <span>تواصل</span>
+            </a>
 
-            <button
-              type="button"
-              onClick={() => backupFileInputRef.current?.click()}
-              className="bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs px-2 py-1 rounded-lg border border-teal-500/60 shadow-xs flex items-center gap-1 transition cursor-pointer"
-              title="استيراد نسخة احتياطية JSON"
-            >
-              <span>📥</span>
-              <span>استيراد</span>
-            </button>
-            <input
-              ref={backupFileInputRef}
-              type="file"
-              accept=".json,application/json"
-              onChange={handleImportBackupJsonFile}
-              className="hidden"
-            />
-
+            {/* AI Keys Pill */}
             <button
               type="button"
               onClick={() => {
                 refreshKeysState();
                 setShowKeyManagerModal(true);
               }}
-              className="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-xs px-2.5 py-1 rounded-lg shadow flex items-center gap-1 transition shrink-0 cursor-pointer"
+              className="hidden sm:inline-flex bg-[#EDE9FE]/70 hover:bg-[#EDE9FE] text-[#6D28D9] border border-[#8B5CF6]/35 font-extrabold text-xs px-3 py-2 rounded-xl items-center gap-1.5 transition shrink-0 cursor-pointer"
               title="إدارة مفاتيح Gemini API وتدويرها"
             >
-              <span>🔑</span>
+              <span className="text-[#8B5CF6]" aria-hidden="true">✦</span>
               <span>المفاتيح</span>
-              <span className="bg-amber-500/20 text-amber-200 border border-amber-500/40 px-1 py-0.2 rounded text-[10px]">
+              <span className="bg-white text-[#6D28D9] px-1.5 py-0.2 rounded-md text-[11px] font-black tabular-nums border border-[#8B5CF6]/20">
                 {userKeys.filter((k) => k.enabled).length}
               </span>
             </button>
-          </div>
 
-          {/* Primary Solve / Generate Button */}
-          <button
-            onClick={handleSolve}
-            disabled={loading || !school}
-            className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
-          >
-            <span>⚡</span>
-            <span>{loading ? "جاري التوليد..." : "إنشاء الجدول"}</span>
-          </button>
+            {/* Primary CTA: Generate / Update Timetable */}
+            <button
+              type="button"
+              onClick={handleSolve}
+              disabled={loading || !school}
+              className="w-full sm:w-auto min-h-[38px] bg-[#0F766E] hover:bg-[#115E59] disabled:opacity-50 text-white font-extrabold text-xs px-4 sm:px-5 py-2 rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+            >
+              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.4} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span>{loading ? "جاري التوليد..." : "إنشاء الجدول"}</span>
+            </button>
+          </div>
         </div>
       </header>
-
       {/* BYOK Gemini API Key Manager Modal */}
       {showKeyManagerModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -1684,18 +1604,16 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setKeyManagerTab("single")}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold transition ${
-                  keyManagerTab === "single" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
-                }`}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold transition ${keyManagerTab === "single" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
+                  }`}
               >
                 ➕ إضافة مفتاح مفرد (باسم مستعار)
               </button>
               <button
                 type="button"
                 onClick={() => setKeyManagerTab("bulk")}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold transition ${
-                  keyManagerTab === "bulk" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
-                }`}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-extrabold transition ${keyManagerTab === "bulk" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
+                  }`}
               >
                 📋 إضافة عدة مفاتيح دفعة واحدة (سطر لكل مفتاح)
               </button>
@@ -1788,15 +1706,14 @@ export default function App() {
                     return (
                       <div
                         key={k.id}
-                        className={`p-3 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs ${
-                          !k.enabled
-                            ? "bg-slate-50 border-slate-200 opacity-75"
-                            : isCooldown
+                        className={`p-3 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs ${!k.enabled
+                          ? "bg-slate-50 border-slate-200 opacity-75"
+                          : isCooldown
                             ? "bg-amber-50/60 border-amber-200"
                             : k.status === "valid"
-                            ? "bg-emerald-50/40 border-emerald-200"
-                            : "bg-white border-slate-200"
-                        }`}
+                              ? "bg-emerald-50/40 border-emerald-200"
+                              : "bg-white border-slate-200"
+                          }`}
                       >
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-2">
@@ -1808,23 +1725,22 @@ export default function App() {
                               {k.masked}
                             </span>
                             <span
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                !k.enabled
-                                  ? "bg-rose-100 text-rose-700"
-                                  : isCooldown
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${!k.enabled
+                                ? "bg-rose-100 text-rose-700"
+                                : isCooldown
                                   ? "bg-amber-100 text-amber-800"
                                   : k.status === "valid"
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : "bg-slate-100 text-slate-600"
-                              }`}
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
                             >
                               {!k.enabled
                                 ? "معطّل"
                                 : isCooldown
-                                ? "تبريد مؤقت (429)"
-                                : k.status === "valid"
-                                ? "صالح ✓"
-                                : "غير مختبر"}
+                                  ? "تبريد مؤقت (429)"
+                                  : k.status === "valid"
+                                    ? "صالح ✓"
+                                    : "غير مختبر"}
                             </span>
                           </div>
                           {k.lastStatusMessage && (
@@ -1844,11 +1760,10 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => handleToggleUserKey(k.id)}
-                            className={`font-bold text-[11px] px-2.5 py-1 rounded-lg border transition ${
-                              k.enabled
-                                ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200"
-                                : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
-                            }`}
+                            className={`font-bold text-[11px] px-2.5 py-1 rounded-lg border transition ${k.enabled
+                              ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200"
+                              : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
+                              }`}
                           >
                             {k.enabled ? "تعطيل" : "تفعيل"}
                           </button>
@@ -1909,11 +1824,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setNewSchoolType("preset")}
-                    className={`py-2 px-3 rounded-xl border-2 text-center font-extrabold text-xs transition ${
-                      newSchoolType === "preset"
-                        ? "border-blue-600 bg-blue-50 text-blue-900 shadow-xs"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
+                    className={`py-2 px-3 rounded-xl border-2 text-center font-extrabold text-xs transition ${newSchoolType === "preset"
+                      ? "border-blue-600 bg-blue-50 text-blue-900 shadow-xs"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
                   >
                     <span>📚 نماذج جاهزة</span>
                     <span className="block text-[10px] font-normal text-slate-500 mt-0.5">
@@ -1923,11 +1837,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setNewSchoolType("blank")}
-                    className={`py-2 px-3 rounded-xl border-2 text-center font-extrabold text-xs transition ${
-                      newSchoolType === "blank"
-                        ? "border-blue-600 bg-blue-50 text-blue-900 shadow-xs"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
+                    className={`py-2 px-3 rounded-xl border-2 text-center font-extrabold text-xs transition ${newSchoolType === "blank"
+                      ? "border-blue-600 bg-blue-50 text-blue-900 shadow-xs"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
                   >
                     <span>📄 قالب فارغ</span>
                     <span className="block text-[10px] font-normal text-slate-500 mt-0.5">
@@ -1937,11 +1850,10 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setNewSchoolType("ai")}
-                    className={`py-2 px-3 rounded-xl border-2 text-center font-extrabold text-xs transition ${
-                      newSchoolType === "ai"
-                        ? "border-blue-600 bg-blue-50 text-blue-900 shadow-xs"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
+                    className={`py-2 px-3 rounded-xl border-2 text-center font-extrabold text-xs transition ${newSchoolType === "ai"
+                      ? "border-blue-600 bg-blue-50 text-blue-900 shadow-xs"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
                   >
                     <span>🤖 ذكاء اصطناعي</span>
                     <span className="block text-[10px] font-normal text-slate-500 mt-0.5">
@@ -1960,33 +1872,30 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => setPresetCategoryFilter("ALL")}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                            presetCategoryFilter === "ALL"
-                              ? "bg-slate-800 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${presetCategoryFilter === "ALL"
+                            ? "bg-slate-800 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            }`}
                         >
                           الكل ({ALL_SCHOOL_PRESETS.length})
                         </button>
                         <button
                           type="button"
                           onClick={() => setPresetCategoryFilter("GOVERNMENT_GENERAL")}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                            presetCategoryFilter === "GOVERNMENT_GENERAL"
-                              ? "bg-blue-600 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${presetCategoryFilter === "GOVERNMENT_GENERAL"
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            }`}
                         >
                           حكومي عام
                         </button>
                         <button
                           type="button"
                           onClick={() => setPresetCategoryFilter("EXPERIMENTAL_LANGUAGE")}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                            presetCategoryFilter === "EXPERIMENTAL_LANGUAGE"
-                              ? "bg-emerald-600 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${presetCategoryFilter === "EXPERIMENTAL_LANGUAGE"
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            }`}
                         >
                           تجريبي لغات
                         </button>
@@ -2007,11 +1916,10 @@ export default function App() {
                               setNewSchoolPresetId(p.id);
                               if (!newSchoolName) setNewSchoolName(p.label);
                             }}
-                            className={`p-3 rounded-xl border-2 cursor-pointer transition text-start ${
-                              isSelected
-                                ? "border-blue-600 bg-blue-50/70 shadow-xs"
-                                : "border-slate-200 hover:border-slate-300 bg-white"
-                            }`}
+                            className={`p-3 rounded-xl border-2 cursor-pointer transition text-start ${isSelected
+                              ? "border-blue-600 bg-blue-50/70 shadow-xs"
+                              : "border-slate-200 hover:border-slate-300 bg-white"
+                              }`}
                           >
                             <div className="flex items-center justify-between mb-1">
                               <div className="flex items-center gap-2">
@@ -2019,19 +1927,18 @@ export default function App() {
                                   {p.stage === "PRIMARY"
                                     ? "🎒"
                                     : p.stage === "PREPARATORY"
-                                    ? "🏫"
-                                    : "🎓"}
+                                      ? "🏫"
+                                      : "🎓"}
                                 </span>
                                 <span className="text-xs font-extrabold text-slate-900">
                                   {p.name}
                                 </span>
                               </div>
                               <span
-                                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                                  p.school_type === "GOVERNMENT_GENERAL"
-                                    ? "bg-blue-100 text-blue-800"
-                                    : "bg-emerald-100 text-emerald-800"
-                                }`}
+                                className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${p.school_type === "GOVERNMENT_GENERAL"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-emerald-100 text-emerald-800"
+                                  }`}
                               >
                                 {p.school_type === "GOVERNMENT_GENERAL"
                                   ? "حكومي عام"
@@ -2123,20 +2030,21 @@ export default function App() {
           {isChatCollapsed ? (
             <div
               onClick={toggleChatCollapse}
-              className="h-full bg-white rounded-2xl border border-slate-300 p-2 flex flex-col items-center justify-between cursor-pointer hover:border-blue-400 hover:shadow-md transition group select-none"
-              title="توسيع لوحة مساعد الشات الذكي"
+              className="h-full bg-[#FFFFFF] rounded-2xl border border-[#E7E5E4] p-2 flex flex-col items-center justify-between cursor-pointer hover:border-[#8B5CF6] hover:shadow-md transition group select-none"
+              title="توسيع لوحة وكيل الجداول الذكي"
             >
-              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center text-sm shadow-xs group-hover:bg-blue-600 transition">
-                🤖
+              <div className="w-8 h-8 rounded-xl bg-[#EDE9FE] text-[#8B5CF6] flex items-center justify-center text-sm shadow-xs group-hover:bg-[#6D28D9] group-hover:text-white transition" aria-hidden="true">
+                ✦
               </div>
-              <div className="[writing-mode:vertical-rl] rotate-180 font-black text-xs text-slate-700 tracking-wider flex items-center gap-2">
-                <span>مساعد الشات الذكي</span>
-                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded">نشط</span>
+              <div className="[writing-mode:vertical-rl] rotate-180 font-black text-xs text-[#1C1917] tracking-wider flex items-center gap-2">
+                <span>وكيل الجداول الذكي</span>
+                <span className="text-[10px] bg-[#CCFBF1] text-[#0F766E] px-1 py-0.5 rounded">نشط</span>
               </div>
               <button
                 type="button"
-                className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 group-hover:bg-blue-50 group-hover:text-blue-700 flex items-center justify-center text-xs font-black transition"
-                title="توسيع"
+                className="w-8 h-8 rounded-xl bg-[#FAFAF9] text-[#1C1917] border border-[#E7E5E4] group-hover:bg-[#EDE9FE] group-hover:text-[#6D28D9] flex items-center justify-center text-xs font-black transition cursor-pointer"
+                title="توسيع لوحة الشات"
+                aria-label="توسيع لوحة الشات"
               >
                 ⇥
               </button>
@@ -2159,34 +2067,65 @@ export default function App() {
 
         {/* Main Content Workspace (Takes full remaining width) */}
         <main className="flex-1 min-w-0 space-y-4">
-          <div className="bg-white rounded-xl p-1 shadow-sm border border-slate-200 flex flex-wrap gap-1">
-            {[
-              { id: "wizard", label: "🧙‍♂️ المعالج" },
-              { id: "timetable", label: "📅 جدول الحصص" },
-              { id: "constraints", label: "👥 المعلمون والتكليفات" },
-              { id: "analyze", label: "📊 تحليل الجدوى" },
-              { id: "ingest", label: "📝 المحرر النصي" },
-            ].map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id as any)}
-                className={`flex-1 min-w-[95px] py-2 px-2.5 rounded-lg text-xs font-bold transition text-center whitespace-nowrap cursor-pointer ${
-                  activeTab === t.id ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          <nav aria-label="التنقل الرئيسي" className="bg-[#FFFFFF] rounded-2xl px-2 sm:px-3 pt-1.5 shadow-2xs border border-[#E7E5E4] flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2 flex-1">
+              {[
+                {
+                  id: "wizard",
+                  label: "إعداد المدرسة",
+                  icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z",
+                },
+                {
+                  id: "timetable",
+                  label: "الجدول والتصدير",
+                  icon: "M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z",
+                },
+                {
+                  id: "constraints",
+                  label: "المعلمون والإسناد",
+                  icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
+                },
+              ].map((t) => {
+                const isActive = activeTab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setActiveTab(t.id as any)}
+                    className={`relative flex items-center justify-center gap-2 py-2.5 px-4 rounded-t-xl text-xs font-extrabold transition whitespace-nowrap cursor-pointer border-b-2 ${isActive
+                      ? "text-[#0F766E] border-[#0F766E] bg-[#CCFBF1]/35"
+                      : "text-[#57534E] border-transparent hover:text-[#1C1917] hover:bg-[#FAFAF9]"
+                      }`}
+                  >
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d={t.icon} />
+                    </svg>
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab(activeTab === "ingest" ? "wizard" : "ingest")}
+              className={`mb-1.5 py-1.5 px-2.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap cursor-pointer border ${activeTab === "ingest"
+                ? "bg-[#1C1917] text-white border-[#1C1917]"
+                : "bg-[#FAFAF9] text-[#57534E] border-[#E7E5E4] hover:text-[#1C1917]"
                 }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+              title="المحرر النصي المتقدم (.md)"
+            >
+              نص (.md)
+            </button>
+          </nav>
 
           {statusMessage && (
-            <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-2.5 rounded-xl text-xs font-bold">
-              ✅ {statusMessage}
+            <div className="bg-[#CCFBF1]/50 border border-[#14B8A6] text-[#0F766E] px-4 py-2.5 rounded-xl text-xs font-bold">
+              ✓ {statusMessage}
             </div>
           )}
           {errorMessage && (
-            <div className="bg-rose-50 border border-rose-200 text-rose-900 px-4 py-2.5 rounded-xl text-xs font-bold">
-              ⚠️ {errorMessage}
+            <div className="bg-[#FFF1F2] border border-[#FB7185] border-s-4 border-s-[#FB7185] text-[#BE123C] px-4 py-2.5 rounded-xl text-xs font-bold">
+              ⚠ {errorMessage}
             </div>
           )}
 
@@ -2205,12 +2144,12 @@ export default function App() {
           )}
 
           {(school?.metadata as any)?.capacity_validation && !(school.metadata as any).capacity_validation.is_valid && (
-            <div className="bg-rose-50 border border-rose-300 text-rose-950 px-4 py-3 rounded-xl text-xs space-y-1.5 shadow-sm">
-              <div className="flex items-center gap-1.5 font-extrabold text-rose-900">
-                <span>🚫</span>
+            <div className="bg-[#FFF1F2] border border-[#FB7185] border-s-4 border-s-[#FB7185] text-[#1C1917] px-4 py-3 rounded-xl text-xs space-y-1.5 shadow-sm">
+              <div className="flex items-center gap-1.5 font-extrabold text-[#BE123C]">
+                <span>⚠</span>
                 <span>تنبيهات الطاقة الاستيعابية:</span>
               </div>
-              <ul className="list-disc list-inside space-y-0.5 text-rose-900/90 pe-2">
+              <ul className="list-disc list-inside space-y-0.5 text-[#BE123C] pe-2">
                 {(school.metadata as any).capacity_validation.errors.map((err: string, idx: number) => (
                   <li key={idx} className="font-semibold">{err}</li>
                 ))}
@@ -2240,11 +2179,27 @@ export default function App() {
             <SchoolWizardStepper
               initialSchool={school}
               onSaveSchool={(updatedSchool, updatedMarkdown) => {
+                const structureChanged = Boolean(
+                  school &&
+                    (updatedSchool.periods_per_day !== school.periods_per_day ||
+                      JSON.stringify(updatedSchool.days) !== JSON.stringify(school.days) ||
+                      JSON.stringify(updatedSchool.sections.map((s) => s.daily_period_limits || null)) !==
+                        JSON.stringify(school.sections.map((s) => s.daily_period_limits || null)))
+                );
                 setSchool(updatedSchool);
                 setRawText(updatedMarkdown);
                 const ana = InBrowserSchoolEngine.analyzeSchool(updatedSchool);
                 setAnalysis(ana);
-                persistSchoolData(updatedSchool, updatedMarkdown, schedule, ana);
+                if (structureChanged && schedule) {
+                  const solved = InBrowserSchoolEngine.solveInBrowser(updatedSchool);
+                  setSchedule(solved.schedule);
+                  setValidation(solved.validation);
+                  setMetrics(solved.metrics);
+                  setLastUpdatedTime(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }));
+                  persistSchoolData(updatedSchool, updatedMarkdown, solved.schedule, ana);
+                } else {
+                  persistSchoolData(updatedSchool, updatedMarkdown, schedule, ana);
+                }
               }}
               onSolveAndOpenTimetable={(schoolToSolve) => {
                 handleSolve(schoolToSolve);
@@ -2254,116 +2209,44 @@ export default function App() {
           )}
 
           {school && activeTab === "ingest" && (
-            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-extrabold text-slate-800">🏫 المدرسة النشطة:</h2>
-                  <select
-                    value={selectedPreset}
-                    onChange={(e) => handleLoadPreset(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold bg-white shadow-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  >
-                    {allSchoolsList.length === 0 ? (
-                      <option value="">(لا توجد مدارس مضافة)</option>
-                    ) : (
-                      allSchoolsList.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSaveCurrentSchool}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition cursor-pointer"
-                    title="حفظ بيانات المدرسة في المتصفح"
-                  >
-                    <span>💾</span>
-                    <span>حفظ</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddSchoolModal(true)}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition cursor-pointer"
-                    title="إضافة مدرسة جديدة"
-                  >
-                    <span>➕</span>
-                    <span>جديدة</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDuplicateSchool}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1 transition cursor-pointer"
-                    title="نسخ المدرسة"
-                  >
-                    <span>📋</span>
-                    <span>نسخ</span>
-                  </button>
-                  {school && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSchool(selectedPreset)}
-                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-rose-200 flex items-center gap-1 transition cursor-pointer"
-                      title="حذف المدرسة"
-                    >
-                      <span>🗑️</span>
-                      <span>حذف</span>
-                    </button>
-                  )}
-                </div>
+            <div className="bg-white rounded-xl border border-[#E7E5E4] p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-[#E7E5E4] pb-2">
+                <h2 className="text-xs sm:text-sm font-extrabold text-[#1C1917]">المحرر النصي المتقدم (.md)</h2>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("wizard")}
+                  className="text-xs font-bold text-[#57534E] hover:text-[#1C1917] cursor-pointer"
+                >
+                  عودة لإعداد المدرسة ×
+                </button>
               </div>
               <textarea
                 rows={14}
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                className="w-full border rounded-xl p-4 text-xs font-mono bg-slate-50"
+                className="w-full border border-[#E7E5E4] rounded-xl p-3 text-xs font-mono bg-[#FAFAF9] text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                 placeholder="الصق هنا نص بيانات المدرسة..."
               />
-              <div className="flex flex-wrap gap-2.5">
+              <div className="flex flex-wrap gap-2">
                 <button
+                  type="button"
                   onClick={handleParseRawText}
                   disabled={loading || !rawText.trim()}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                  className="bg-[#0F766E] hover:bg-[#115E59] disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
                 >
-                  🧠 تحليل النص
+                  تحليل النص
                 </button>
                 <button
+                  type="button"
                   onClick={handleSolve}
                   disabled={loading || !school}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                  className="bg-[#1C1917] hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
                 >
-                  ⚡ إنشاء الجدول
+                  إنشاء الجدول
                 </button>
               </div>
             </div>
           )}
-
-          {activeTab === "analyze" && analysis && (
-            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                <div className="p-3 bg-slate-50 rounded-xl border">
-                  <div className="text-xs text-slate-500">حالة الجدوى</div>
-                  <div className={`text-base font-extrabold ${analysis.is_feasible ? "text-emerald-600" : "text-rose-600"}`}>
-                    {analysis.is_feasible ? "قابلة للحل 100%" : "يوجد تعارض"}
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-xl border">
-                  <div className="text-xs text-slate-500">الفصول</div>
-                  <div className="text-xl font-extrabold">{analysis.total_sections}</div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-xl border">
-                  <div className="text-xs text-slate-500">المعلمون</div>
-                  <div className="text-xl font-extrabold">{analysis.total_teachers}</div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-xl border">
-                  <div className="text-xs text-slate-500">إجمالي الحصص</div>
-                  <div className="text-xl font-extrabold text-blue-600">{analysis.total_weekly_periods}</div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {activeTab === "constraints" && school && (
             <TeacherManagementHub
               school={school}
@@ -2376,72 +2259,12 @@ export default function App() {
 
 
           {activeTab === "timetable" && school && (
-            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-              {/* Live Auto-Update Status Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-slate-50 border border-blue-200/80 rounded-xl text-xs shadow-2xs">
-                <div className="flex items-center gap-2.5">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                  </span>
-                  <span className="font-extrabold text-blue-950 flex items-center gap-1">
-                    <span>⚡ التحديث التلقائي للجدول مفعل على الشاشة</span>
-                  </span>
-                  <span className="text-[11px] text-slate-500 hidden md:inline">
-                    (أي أمر أو تعديل من وكيل الذكاء الاصطناعي أو مصفوفة القيود ينعكس في هذا الجدول مباشرة بضمان 0% تعارضات)
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("wizard")}
-                    className="bg-blue-50 hover:bg-blue-100 text-blue-900 text-[11px] font-extrabold px-3 py-1 rounded-lg border border-blue-200 shadow-2xs flex items-center gap-1 transition"
-                    title="تعديل المدرسة بالمعالج (الخطوات الـ 6)"
-                  >
-                    <span>🧙‍♂️</span>
-                    <span>تعديل بالمعالج</span>
-                  </button>
-                  <span className="text-[11px] font-bold text-slate-600 bg-white/80 border border-slate-200 px-2 py-0.5 rounded-lg">
-                    آخر تحديث: {lastUpdatedTime}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleForceRefreshSchedule}
-                    disabled={loading}
-                    className="bg-white hover:bg-slate-100 text-slate-800 text-[11px] font-extrabold px-3 py-1 rounded-lg border border-slate-300 shadow-2xs flex items-center gap-1 transition disabled:opacity-50"
-                    title="إعادة بناء وتحديث جدول الحصص المعروض على الشاشة فوراً"
-                  >
-                    <span>🔄</span>
-                    <span>{loading ? "جاري التحديث..." : "تحديث الشاشة الآن"}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Diff Preview Banner if diff is pending */}
-              {pendingDiff && (
-                <TimetableDiffPreview
-                  diff={pendingDiff}
-                  onApply={() => {
-                    const candidate = pendingDiff.preview_schedule;
-                    setSchedule(candidate);
-                    if (school) {
-                      persistSchoolData(school, undefined, candidate);
-                    }
-                    setPendingDiff(null);
-                    setStatusMessage("✅ تم تطبيق كافة التعديلات على الجدول بنجاح!");
-                  }}
-                  onDiscard={() => {
-                    setPendingDiff(null);
-                    setStatusMessage("↩️ تم إلغاء معاينة التعديلات والاحتفاظ بالجدول السابق دون تغيير.");
-                  }}
-                />
-              )}
-
+            <div className="bg-[#FFFFFF] rounded-xl border border-[#E7E5E4] p-5 space-y-4">
               {/* Swap Mode Notification Bar */}
               {selectedSwapEntry && (
-                <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 text-white rounded-xl shadow-md text-xs font-bold animate-fadeIn">
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-[#EDE9FE] border border-[#8B5CF6] text-[#6D28D9] rounded-xl shadow-sm text-xs font-bold">
                   <div className="flex items-center gap-2">
-                    <span className="text-base animate-bounce">🔄</span>
+                    <span className="text-base motion-safe:animate-bounce">🔄</span>
                     <span>
                       وضع تبديل الحصص نشط: تم تحديد [{getSubjectName(selectedSwapEntry.subject_id)} - {getSectionName(selectedSwapEntry.section_id)} ({DAY_NAMES_AR[selectedSwapEntry.day]} ح {selectedSwapEntry.period})]. انقر على أي حصة أخرى في الجدول لتبديل المكانين فوراً بدون تعارض!
                     </span>
@@ -2459,37 +2282,31 @@ export default function App() {
                 </div>
               )}
 
-              {/* View Switcher & Action Bar (Row 1) */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200">
-                <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl">
+              {/* View Switcher & Calm Export Hierarchy */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#E7E5E4]">
+                <div className="flex flex-wrap items-center gap-1 bg-[#FAFAF9] border border-[#E7E5E4] p-1 rounded-xl">
                   <button
                     type="button"
                     onClick={() => setViewMode("master")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      viewMode === "master" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${viewMode === "master" ? "bg-[#0F766E] text-white shadow-2xs" : "text-[#57534E] hover:text-[#1C1917]"
+                      }`}
                   >
-                    <span>🗺️</span>
                     <span>الجدول العام</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setViewMode("section")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      viewMode === "section" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${viewMode === "section" ? "bg-[#0F766E] text-white shadow-2xs" : "text-[#57534E] hover:text-[#1C1917]"
+                      }`}
                   >
-                    <span>🏫</span>
                     <span>الفصول</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setViewMode("teacher")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      viewMode === "teacher" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${viewMode === "teacher" ? "bg-[#0F766E] text-white shadow-2xs" : "text-[#57534E] hover:text-[#1C1917]"
+                      }`}
                   >
-                    <span>👨‍🏫</span>
                     <span>المعلمون</span>
                   </button>
                 </div>
@@ -2499,64 +2316,57 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setIsTimetableFullscreen(!isTimetableFullscreen)}
-                      className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      className="bg-[#1C1917] hover:bg-stone-800 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
                       title="تكبير أو تصغير الجدول لملء الشاشة"
                     >
-                      <span>{isTimetableFullscreen ? "🗗" : "⛶"}</span>
-                      <span>{isTimetableFullscreen ? "إنهاء" : "ملء الشاشة"}</span>
+                      <span>{isTimetableFullscreen ? "إنهاء ملء الشاشة" : "ملء الشاشة"}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => window.print()}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-lg border border-[#E7E5E4] shadow-2xs flex items-center gap-1 transition cursor-pointer"
                       title="طباعة سريعة للجدول المعروض"
                     >
-                      <span>🖨️</span>
                       <span>طباعة</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "master").catch((e) => setErrorMessage(e.message))}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-lg border border-[#E7E5E4] shadow-2xs flex items-center gap-1 transition cursor-pointer"
                       title="طباعة الجدول العام A3"
                     >
-                      <span>🗺️</span>
-                      <span>PDF العام</span>
+                      <span>PDF العام A3</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "sections").catch((e) => setErrorMessage(e.message))}
-                      className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-lg border border-[#E7E5E4] shadow-2xs flex items-center gap-1 transition cursor-pointer"
                       title="طباعة بطاقات الفصول A4"
                     >
-                      <span>✂</span>
                       <span>بطاقات الفصول</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "teachers").catch((e) => setErrorMessage(e.message))}
-                      className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-lg border border-[#E7E5E4] shadow-2xs flex items-center gap-1 transition cursor-pointer"
                       title="طباعة بطاقات المعلمين A4"
                     >
-                      <span>👨‍🏫</span>
                       <span>بطاقات المعلمين</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "all").catch((e) => setErrorMessage(e.message))}
-                      className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#0F766E] text-xs font-bold px-2.5 py-1.5 rounded-lg border border-[#14B8A6] shadow-2xs flex items-center gap-1 transition cursor-pointer"
                       title="تصدير ملف PDF الشامل"
                     >
-                      <span>📄</span>
                       <span>PDF الشامل</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => service.downloadExport("excel", school, schedule, "all").catch((e) => setErrorMessage(e.message))}
-                      className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      className="bg-[#0F766E] hover:bg-[#115E59] text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
                       title="تصدير إكسيل ملون 4 صفحات"
                     >
-                      <span>📊</span>
                       <span>Excel ملون</span>
                     </button>
                   </div>
@@ -2564,18 +2374,18 @@ export default function App() {
               </div>
 
               {/* Responsive Timetable Controls Toolbar */}
-              <div className="bg-slate-50/90 rounded-2xl border border-slate-200 p-2.5 space-y-2 text-xs shadow-xs">
+              <div className="bg-[#FAFAF9] rounded-2xl border border-[#E7E5E4] p-2.5 space-y-2 text-xs">
                 {/* Row 1: Search Bar & Horizontal Scroll Day Filter */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
-                  {/* Search Input */}
-                  <div className="relative flex-1 min-w-[150px] max-w-full sm:max-w-xs">
-                    <span className="absolute start-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                  {/* Search Input (Wider to prevent placeholder truncation) */}
+                  <div className="relative flex-1 min-w-[200px] max-w-full sm:max-w-sm">
+                    <span className="absolute start-2.5 top-1/2 -translate-y-1/2 text-[#57534E] text-xs" aria-hidden="true">🔍</span>
                     <input
                       type="text"
                       value={timetableSearch}
                       onChange={(e) => setTimetableSearch(e.target.value)}
-                      placeholder="بحث عن معلم أو مادة أو فصل..."
-                      className="w-full ps-8 pe-7 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="ابحث عن معلم أو مادة أو فصل..."
+                      className="w-full ps-8 pe-8 py-1.5 bg-[#FFFFFF] border border-[#D6D3D1] rounded-xl text-xs font-bold text-[#1C1917] placeholder:text-[#57534E] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                     />
                     {timetableSearch && (
                       <button
@@ -2595,24 +2405,22 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setTimetableDayFilter(null)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border shrink-0 cursor-pointer ${
-                        timetableDayFilter === null
-                          ? "bg-blue-600 text-white border-blue-600 font-extrabold shadow-2xs"
-                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                      }`}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border shrink-0 cursor-pointer ${timetableDayFilter === null || !getOrderedSchoolDays(school).includes(timetableDayFilter)
+                        ? "bg-[#0F766E] text-white border-[#0F766E] font-extrabold shadow-2xs"
+                        : "bg-[#FFFFFF] text-[#57534E] border-[#E7E5E4] hover:bg-[#FAFAF9] hover:text-[#1C1917]"
+                        }`}
                     >
                       الكل
                     </button>
-                    {school.days.map((d) => (
+                    {getOrderedSchoolDays(school).map((d) => (
                       <button
                         key={d}
                         type="button"
                         onClick={() => setTimetableDayFilter(d)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border shrink-0 cursor-pointer ${
-                          timetableDayFilter === d
-                            ? "bg-blue-600 text-white border-blue-600 font-extrabold shadow-2xs"
-                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                        }`}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border shrink-0 cursor-pointer ${timetableDayFilter === d
+                          ? "bg-[#0F766E] text-white border-[#0F766E] font-extrabold shadow-2xs"
+                          : "bg-[#FFFFFF] text-[#57534E] border-[#E7E5E4] hover:bg-[#FAFAF9] hover:text-[#1C1917]"
+                          }`}
                       >
                         {DAY_NAMES_AR[d]}
                       </button>
@@ -2629,18 +2437,16 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => setMasterRowMode("teachers")}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                            masterRowMode === "teachers" ? "bg-blue-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${masterRowMode === "teachers" ? "bg-[#0F766E] text-white shadow-2xs" : "text-[#57534E] hover:text-[#1C1917]"
+                            }`}
                         >
                           بالمعلمين
                         </button>
                         <button
                           type="button"
                           onClick={() => setMasterRowMode("sections")}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                            masterRowMode === "sections" ? "bg-blue-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${masterRowMode === "sections" ? "bg-[#0F766E] text-white shadow-2xs" : "text-[#57534E] hover:text-[#1C1917]"
+                            }`}
                         >
                           بالفصول
                         </button>
@@ -2699,9 +2505,8 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setColorMode("subject")}
-                        className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
-                          colorMode === "subject" ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                        }`}
+                        className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${colorMode === "subject" ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                          }`}
                         title="تلوين الحقول حسب المادة"
                       >
                         بالمواد
@@ -2709,9 +2514,8 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setColorMode("section")}
-                        className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
-                          colorMode === "section" ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                        }`}
+                        className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${colorMode === "section" ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                          }`}
                         title="تلوين الحقول حسب الفصل"
                       >
                         بالفصول
@@ -2724,27 +2528,24 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setCellDensity("compact")}
-                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
-                          cellDensity === "compact" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                        }`}
+                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${cellDensity === "compact" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                          }`}
                       >
                         مدمج
                       </button>
                       <button
                         type="button"
                         onClick={() => setCellDensity("balanced")}
-                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
-                          cellDensity === "balanced" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                        }`}
+                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${cellDensity === "balanced" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                          }`}
                       >
                         متوازن
                       </button>
                       <button
                         type="button"
                         onClick={() => setCellDensity("spacious")}
-                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
-                          cellDensity === "spacious" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                        }`}
+                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${cellDensity === "spacious" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                          }`}
                       >
                         موسع
                       </button>
@@ -2754,11 +2555,10 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setMergeDoublePeriods(!mergeDoublePeriods)}
-                      className={`px-2.5 py-1 rounded-xl text-[10.5px] font-bold transition border cursor-pointer ${
-                        mergeDoublePeriods
-                          ? "bg-indigo-50 text-indigo-700 border-indigo-300 font-extrabold shadow-2xs"
-                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                      }`}
+                      className={`px-2.5 py-1 rounded-xl text-[10.5px] font-bold transition border cursor-pointer ${mergeDoublePeriods
+                        ? "bg-indigo-50 text-indigo-700 border-indigo-300 font-extrabold shadow-2xs"
+                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                        }`}
                       title="دمج الحصص المزدوجة المتتالية كمستطيل موحد بنص واحد متصل"
                     >
                       دمج المزدوجة {mergeDoublePeriods ? "✓" : ""}
@@ -2776,6 +2576,8 @@ export default function App() {
                     cellHeight: "h-[52px]",
                     cellMinHeight: "52px",
                     cellMinWidth: "78px",
+                    masterMinWidth: "36px",
+                    masterMinHeight: "34px",
                     primaryText: "text-[10px] font-extrabold",
                     secondaryText: "text-[9px] font-semibold",
                     badgeText: "text-[8.5px] px-1 py-0.2",
@@ -2785,6 +2587,8 @@ export default function App() {
                     cellHeight: "h-[68px]",
                     cellMinHeight: "68px",
                     cellMinWidth: "98px",
+                    masterMinWidth: "42px",
+                    masterMinHeight: "40px",
                     primaryText: "text-[11.5px] font-extrabold",
                     secondaryText: "text-[10px] font-semibold",
                     badgeText: "text-[9px] px-1.5 py-0.5",
@@ -2794,6 +2598,8 @@ export default function App() {
                     cellHeight: "h-[86px]",
                     cellMinHeight: "86px",
                     cellMinWidth: "118px",
+                    masterMinWidth: "52px",
+                    masterMinHeight: "48px",
                     primaryText: "text-xs font-black",
                     secondaryText: "text-[11px] font-bold",
                     badgeText: "text-[10px] px-2 py-0.5",
@@ -2801,7 +2607,16 @@ export default function App() {
                   },
                 }[cellDensity];
 
-                const displayedDays = timetableDayFilter !== null ? [timetableDayFilter] : school.days;
+                const isCompactMasterTeachers = viewMode === "master" && masterRowMode === "teachers";
+                const activeColMinWidth = isCompactMasterTeachers ? densityConfig.masterMinWidth : densityConfig.cellMinWidth;
+                const activeCellMinHeight = isCompactMasterTeachers ? densityConfig.masterMinHeight : densityConfig.cellMinHeight;
+
+                const orderedSchoolDays = getOrderedSchoolDays(school);
+                const displayedDays =
+                  timetableDayFilter !== null && orderedSchoolDays.includes(timetableDayFilter)
+                    ? [timetableDayFilter]
+                    : orderedSchoolDays;
+                const getDayMaxPeriodsForDisplay = (d: number) => getDayMaxPeriods(school, d, activeSchedule?.entries);
 
                 const isEntrySearchMatch = (entry: TimetableEntry) => {
                   const q = timetableSearch.trim().toLowerCase();
@@ -2817,13 +2632,14 @@ export default function App() {
                   isOff: boolean = false,
                   secondaryType: "section" | "teacher" = "section",
                   isDouble: boolean = false,
-                  pairedEntry?: TimetableEntry
+                  pairedEntry?: TimetableEntry,
+                  compactSectionOnly: boolean = false
                 ) => {
                   if (!entry) {
                     if (isOff) {
                       return (
-                        <div className="w-full h-full rounded-xl bg-rose-50/80 border border-rose-200/90 flex flex-col items-center justify-center text-rose-700 font-extrabold text-[11px] p-1 shadow-2xs">
-                          <span>إجازة رسمية</span>
+                        <div className="w-full h-full rounded-lg bg-rose-50/80 border border-rose-200/90 flex items-center justify-center text-rose-700 font-extrabold text-[11px] shadow-2xs">
+                          <span aria-label="إجازة رسمية" title="إجازة رسمية">---</span>
                         </div>
                       );
                     }
@@ -2843,35 +2659,76 @@ export default function App() {
                     (pairedEntry && selectedSwapEntry?.entry_id === pairedEntry.entry_id);
                   const isMatch = isEntrySearchMatch(entry) || (pairedEntry && isEntrySearchMatch(pairedEntry));
                   const subjectName = getSubjectName(entry.subject_id);
+                  const secObj = school.sections.find((s) => s.id === entry.section_id);
+                  const gradeObj = secObj ? school.grades.find((g) => g.id === secObj.grade_id) : undefined;
+                  const gradeLabel = gradeObj?.name || "";
+                  const sectionCodeOnly = formatSection(getSectionName(entry.section_id));
                   const secondaryLabel =
                     secondaryType === "section"
-                      ? formatSection(getSectionName(entry.section_id))
+                      ? sectionCodeOnly
                       : getTeacherName(entry.teacher_id);
+                  const periodRange = isDouble && pairedEntry ? `ح ${entry.period}-${pairedEntry.period}` : `ح ${entry.period}`;
+                  const gradePrefix = gradeLabel ? `${gradeLabel} · ` : "";
+                  const hoverTooltip = `${gradePrefix}فصل ${getSectionName(entry.section_id)} · ${subjectName} (${DAY_NAMES_AR[entry.day]} ${periodRange})${entry.is_pinned ? " [مثبت]" : ""} — انقر للمبادلة، كليك يمين للتثبيت`;
+
+                  if (compactSectionOnly) {
+                    return (
+                      <div
+                        onClick={() => handleCellSwapClick(entry, pairedEntry)}
+                        onContextMenu={(ev) => {
+                          ev.preventDefault();
+                          togglePinEntry(entry, pairedEntry);
+                        }}
+                        className={`w-full h-full rounded-lg flex items-center justify-center font-black transition-all duration-150 cursor-pointer select-none relative border ${isChangedCell
+                          ? "ring-2 ring-[#8B5CF6] border-dashed border-[#6D28D9] motion-safe:animate-pulse"
+                          : isSelectedForSwap
+                            ? "ring-2 ring-[#0F766E] scale-[1.04] shadow-md z-20"
+                            : !isMatch && timetableSearch
+                              ? "opacity-25 grayscale-[60%]"
+                              : isMatch && timetableSearch
+                                ? "ring-2 ring-[#0F766E] shadow-xs z-10"
+                                : "hover:brightness-95"
+                          }`}
+                        style={{
+                          backgroundColor: isChangedCell ? "#EDE9FE" : pal.bg,
+                          borderColor: entry.is_pinned ? "#0F766E" : isChangedCell ? "#8B5CF6" : isSelectedForSwap ? "#0F766E" : pal.border,
+                          borderWidth: entry.is_pinned ? "2px" : "1px",
+                          color: isChangedCell ? "#6D28D9" : pal.text,
+                        }}
+                        title={hoverTooltip}
+                      >
+                        <span className="text-[11px] font-black leading-none tracking-tight tabular-nums">
+                          {sectionCodeOnly}
+                        </span>
+                        {entry.is_pinned && (
+                          <span className="absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-[#0F766E]" aria-label="مثبت" />
+                        )}
+                        {isChangedCell && (
+                          <span className="absolute bottom-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-[#6D28D9]" aria-label="معدل" />
+                        )}
+                      </div>
+                    );
+                  }
 
                   return (
                     <div
                       onClick={() => handleCellSwapClick(entry, pairedEntry)}
-                      className={`w-full h-full rounded-xl flex flex-col justify-between transition-all duration-150 cursor-pointer select-none relative border shadow-2xs hover:shadow-md ${
-                        isChangedCell
-                          ? "ring-2 ring-blue-500 border-dashed border-blue-600 motion-safe:animate-pulse"
-                          : isSelectedForSwap
-                          ? "ring-3 ring-amber-500 scale-[1.03] shadow-lg z-20"
+                      className={`w-full h-full rounded-xl flex flex-col justify-between transition-all duration-150 cursor-pointer select-none relative border shadow-2xs hover:shadow-md ${isChangedCell
+                        ? "ring-2 ring-[#8B5CF6] border-dashed border-[#6D28D9] motion-safe:animate-pulse"
+                        : isSelectedForSwap
+                          ? "ring-3 ring-[#0F766E] scale-[1.03] shadow-lg z-20"
                           : !isMatch && timetableSearch
-                          ? "opacity-30 grayscale-[50%]"
-                          : isMatch && timetableSearch
-                          ? "ring-2 ring-indigo-500 scale-[1.01] shadow-sm z-10"
-                          : "hover:scale-[1.01]"
-                      } ${densityConfig.cellPadding}`}
+                            ? "opacity-30 grayscale-[50%]"
+                            : isMatch && timetableSearch
+                              ? "ring-2 ring-[#0F766E] scale-[1.01] shadow-sm z-10"
+                              : "hover:scale-[1.01]"
+                        } ${densityConfig.cellPadding}`}
                       style={{
-                        backgroundColor: isChangedCell ? "#E0F2FE" : pal.bg,
-                        borderColor: isChangedCell ? "#2563EB" : isSelectedForSwap ? "#D97706" : pal.border,
-                        color: isChangedCell ? "#1E3A8A" : pal.text,
+                        backgroundColor: isChangedCell ? "#EDE9FE" : pal.bg,
+                        borderColor: isChangedCell ? "#8B5CF6" : isSelectedForSwap ? "#0F766E" : pal.border,
+                        color: isChangedCell ? "#6D28D9" : pal.text,
                       }}
-                      title={
-                        isDouble && pairedEntry
-                          ? `حصة مزدوجة موحدة | ${subjectName} (${DAY_NAMES_AR[entry.day]} ح ${entry.period}-${pairedEntry.period}) - انقر للمبادلة`
-                          : `حصة دراسية | ${subjectName} (${DAY_NAMES_AR[entry.day]} ح ${entry.period}) - انقر للمبادلة`
-                      }
+                      title={hoverTooltip}
                     >
                       {/* Top Header inside cell */}
                       <div className="flex items-center justify-between w-full gap-1">
@@ -2898,11 +2755,11 @@ export default function App() {
                           className="shrink-0 cursor-pointer"
                         >
                           {entry.is_pinned ? (
-                            <span className="text-[8.5px] font-black bg-amber-500 text-white px-1 py-0.2 rounded shadow-2xs">
+                            <span className="text-[10px] font-black bg-[#0F766E] text-white px-1.5 py-0.2 rounded shadow-2xs">
                               مثبت
                             </span>
                           ) : (
-                            <span className="text-[9px] text-slate-400 opacity-60 hover:opacity-100 hover:text-slate-700 transition">
+                            <span className="text-[10px] font-bold text-[#57534E] bg-[#FFFFFF]/80 px-1 py-0.2 rounded border border-[#E7E5E4] hover:text-[#1C1917] transition">
                               تثبيت
                             </span>
                           )}
@@ -2931,7 +2788,7 @@ export default function App() {
                             </span>
                           )}
                           {isChangedCell && (
-                            <span className="bg-blue-700 text-white text-[8px] px-1 py-0.2 rounded font-extrabold">
+                            <span className="bg-[#6D28D9] text-white text-[10px] px-1.5 py-0.2 rounded font-extrabold" aria-label="حصة معدلة">
                               معدل
                             </span>
                           )}
@@ -2963,6 +2820,26 @@ export default function App() {
                       </div>
                     )}
 
+                    {/* Compact Diff Preview Controls directly above timetable */}
+                    {pendingDiff && (
+                      <TimetableDiffPreview
+                        diff={pendingDiff}
+                        onApply={() => {
+                          const candidate = pendingDiff.preview_schedule;
+                          setSchedule(candidate);
+                          if (school) {
+                            persistSchoolData(school, undefined, candidate);
+                          }
+                          setPendingDiff(null);
+                          setStatusMessage("✅ تم تطبيق كافة التعديلات على الجدول بنجاح!");
+                        }}
+                        onDiscard={() => {
+                          setPendingDiff(null);
+                          setStatusMessage("↩️ تم إلغاء معاينة التعديلات والاحتفاظ بالجدول السابق دون تغيير.");
+                        }}
+                      />
+                    )}
+
                     {/* Master View */}
                     {viewMode === "master" && (
                       <div className="space-y-3">
@@ -2987,12 +2864,12 @@ export default function App() {
                               <tr className="bg-slate-900 text-white">
                                 <th
                                   rowSpan={2}
-                                  className="sticky start-0 z-30 bg-slate-900 text-white p-3 text-start font-extrabold text-xs min-w-[140px] border-b border-e border-slate-700 shadow-[3px_0_8px_rgba(0,0,0,0.18)]"
+                                  className="sticky start-0 z-30 bg-slate-900 text-white p-3 text-start font-extrabold text-xs min-w-[115px] border-b border-e border-slate-700 shadow-[3px_0_8px_rgba(0,0,0,0.18)]"
                                 >
                                   {masterRowMode === "teachers" ? "المعلم / اليوم" : "الفصل / اليوم"}
                                 </th>
                                 {displayedDays.map((d) => {
-                                  const dayPeriods = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                  const dayPeriods = getDayMaxPeriodsForDisplay(d);
                                   return (
                                     <th
                                       key={d}
@@ -3007,12 +2884,12 @@ export default function App() {
                               {/* Periods Sub-Header */}
                               <tr className="bg-slate-800 text-slate-200">
                                 {displayedDays.map((d) => {
-                                  const dayPeriods = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                  const dayPeriods = getDayMaxPeriodsForDisplay(d);
                                   return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => (
                                     <th
                                       key={`h-${d}-${p}`}
                                       className="bg-slate-800 text-slate-200 p-1.5 text-center font-extrabold text-[10.5px] border-b border-l border-slate-700 whitespace-nowrap"
-                                      style={{ minWidth: densityConfig.cellMinWidth }}
+                                      style={{ minWidth: activeColMinWidth }}
                                     >
                                       ح {p}
                                     </th>
@@ -3023,138 +2900,148 @@ export default function App() {
                             <tbody>
                               {masterRowMode === "teachers"
                                 ? school.teachers.map((tch) => {
-                                    const teacherEntriesCount = activeSchedule.entries.filter((e) => e.teacher_id === tch.id).length;
-                                    return (
-                                      <tr key={tch.id} className="hover:bg-slate-50/70 transition-colors">
-                                        <td className="sticky start-0 z-20 bg-white p-2.5 text-start border-b border-e border-slate-300 shadow-[3px_0_8px_rgba(0,0,0,0.06)] min-w-[140px]">
-                                          <div className="font-extrabold text-xs text-slate-900 leading-tight flex items-center gap-1.5">
-                                            <span>👨‍🏫</span>
-                                            <span>{tch.name}</span>
-                                          </div>
-                                          <div className="text-[10px] text-slate-500 font-bold mt-1">
-                                            {teacherEntriesCount} حصة {tch.code ? `· ${tch.code}` : ""}
-                                          </div>
-                                        </td>
-                                        {displayedDays.map((d) => {
-                                          const dayPeriods = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
-                                          const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
-                                          const consumedPeriods = new Set<number>();
+                                  const teacherEntriesCount = activeSchedule.entries.filter((e) => e.teacher_id === tch.id).length;
+                                  return (
+                                    <tr key={tch.id} className="hover:bg-slate-50/70 transition-colors">
+                                      <td className="sticky start-0 z-20 bg-white px-2.5 py-1.5 text-start border-b border-e border-slate-300 shadow-[3px_0_8px_rgba(0,0,0,0.06)] min-w-[115px]">
+                                        <div className="font-extrabold text-xs text-slate-900 leading-tight">
+                                          {tch.name}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 font-bold mt-0.5">
+                                          {teacherEntriesCount} حصة
+                                        </div>
+                                      </td>
+                                      {displayedDays.map((d) => {
+                                        const dayPeriods = getDayMaxPeriodsForDisplay(d);
+                                        const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
+                                        const consumedPeriods = new Set<number>();
 
-                                          return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => {
-                                            if (consumedPeriods.has(p)) return null;
+                                        return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => {
+                                          if (consumedPeriods.has(p)) return null;
 
-                                            const entry = activeSchedule.entries.find(
-                                              (e) => e.teacher_id === tch.id && e.day === d && e.period === p
-                                            );
+                                          const entry = activeSchedule.entries.find(
+                                            (e) => e.teacher_id === tch.id && e.day === d && e.period === p
+                                          );
 
-                                            let isDoubleStart = false;
-                                            let pairedEntry: TimetableEntry | undefined = undefined;
+                                          let isDoubleStart = false;
+                                          let pairedEntry: TimetableEntry | undefined = undefined;
 
-                                            if (entry && mergeDoublePeriods) {
-                                              const nextP = p + 1;
-                                              if (nextP <= dayPeriods) {
-                                                const next = activeSchedule.entries.find(
-                                                  (e) =>
-                                                    e.teacher_id === tch.id &&
-                                                    e.day === d &&
-                                                    e.period === nextP &&
-                                                    e.section_id === entry.section_id &&
-                                                    e.subject_id === entry.subject_id
-                                                );
-                                                if (next) {
-                                                  isDoubleStart = true;
-                                                  pairedEntry = next;
-                                                  consumedPeriods.add(nextP);
-                                                }
+                                          if (entry && mergeDoublePeriods) {
+                                            const nextP = p + 1;
+                                            if (nextP <= dayPeriods) {
+                                              const next = activeSchedule.entries.find(
+                                                (e) =>
+                                                  e.teacher_id === tch.id &&
+                                                  e.day === d &&
+                                                  e.period === nextP &&
+                                                  e.section_id === entry.section_id &&
+                                                  e.subject_id === entry.subject_id
+                                              );
+                                              if (next) {
+                                                isDoubleStart = true;
+                                                pairedEntry = next;
+                                                consumedPeriods.add(nextP);
                                               }
                                             }
+                                          }
 
-                                            return (
-                                              <td
-                                                key={`${tch.id}-${d}-${p}`}
-                                                colSpan={isDoubleStart ? 2 : 1}
-                                                className="p-1 border-b border-l border-slate-200 text-center align-middle"
-                                                style={{
-                                                  minWidth: isDoubleStart
-                                                    ? `calc(${densityConfig.cellMinWidth} * 2)`
-                                                    : densityConfig.cellMinWidth,
-                                                  height: densityConfig.cellMinHeight,
-                                                }}
-                                              >
-                                                {renderTimetableCell(entry, isOff, "section", isDoubleStart, pairedEntry)}
-                                              </td>
-                                            );
-                                          });
-                                        })}
-                                      </tr>
-                                    );
-                                  })
+                                          return (
+                                            <td
+                                              key={`${tch.id}-${d}-${p}`}
+                                              colSpan={isDoubleStart ? 2 : 1}
+                                              className="p-0.5 border-b border-l border-slate-200 text-center align-middle"
+                                              style={{
+                                                minWidth: isDoubleStart
+                                                  ? `calc(${activeColMinWidth} * 2)`
+                                                  : activeColMinWidth,
+                                                height: activeCellMinHeight,
+                                              }}
+                                            >
+                                              {renderTimetableCell(entry, isOff, "section", isDoubleStart, pairedEntry, true)}
+                                            </td>
+                                          );
+                                        });
+                                      })}
+                                    </tr>
+                                  );
+                                })
                                 : school.sections.map((sec) => {
-                                    const secEntriesCount = activeSchedule.entries.filter((e) => e.section_id === sec.id).length;
-                                    return (
-                                      <tr key={sec.id} className="hover:bg-slate-50/70 transition-colors">
-                                        <td className="sticky start-0 z-20 bg-white p-2.5 text-start border-b border-e border-slate-300 shadow-[3px_0_8px_rgba(0,0,0,0.06)] min-w-[140px]">
-                                          <div className="font-extrabold text-xs text-slate-900 leading-tight flex items-center gap-1.5">
-                                            <span>🏫</span>
-                                            <span>{formatSection(sec.name)}</span>
-                                          </div>
-                                          <div className="text-[10px] text-slate-500 font-bold mt-1">
-                                            {secEntriesCount} حصة أسبوعياً
-                                          </div>
-                                        </td>
-                                        {displayedDays.map((d) => {
-                                          const dayPeriods = sec.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                  const secEntriesCount = activeSchedule.entries.filter((e) => e.section_id === sec.id).length;
+                                  return (
+                                    <tr key={sec.id} className="hover:bg-slate-50/70 transition-colors">
+                                      <td className="sticky start-0 z-20 bg-white p-2.5 text-start border-b border-e border-slate-300 shadow-[3px_0_8px_rgba(0,0,0,0.06)] min-w-[140px]">
+                                        <div className="font-extrabold text-xs text-slate-900 leading-tight">
+                                          {formatSection(sec.name)}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 font-bold mt-1">
+                                          {secEntriesCount} حصة أسبوعياً
+                                        </div>
+                                      </td>
+                                      {displayedDays.map((d) => {
+                                        const dayMaxPeriods = getDayMaxPeriodsForDisplay(d);
+                                          const dayPeriods = getSectionDayPeriods(school, sec, d);
                                           const consumedPeriods = new Set<number>();
 
-                                          return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => {
+                                          return Array.from({ length: dayMaxPeriods }, (_, i) => i + 1).map((p) => {
                                             if (consumedPeriods.has(p)) return null;
-
-                                            const entry = activeSchedule.entries.find(
-                                              (e) => e.section_id === sec.id && e.day === d && e.period === p
-                                            );
-
-                                            let isDoubleStart = false;
-                                            let pairedEntry: TimetableEntry | undefined = undefined;
-
-                                            if (entry && mergeDoublePeriods) {
-                                              const nextP = p + 1;
-                                              if (nextP <= dayPeriods) {
-                                                const next = activeSchedule.entries.find(
-                                                  (e) =>
-                                                    e.section_id === sec.id &&
-                                                    e.day === d &&
-                                                    e.period === nextP &&
-                                                    e.teacher_id === entry.teacher_id &&
-                                                    e.subject_id === entry.subject_id
-                                                );
-                                                if (next) {
-                                                  isDoubleStart = true;
-                                                  pairedEntry = next;
-                                                  consumedPeriods.add(nextP);
-                                                }
-                                              }
+                                            if (p > dayPeriods) {
+                                              return (
+                                                <td
+                                                  key={`${sec.id}-${d}-${p}`}
+                                                  className="p-1 border-b border-l border-slate-200 text-center bg-slate-100/60 text-slate-300 font-bold"
+                                                  style={{ minWidth: densityConfig.cellMinWidth, height: densityConfig.cellMinHeight }}
+                                                >
+                                                  —
+                                                </td>
+                                              );
                                             }
 
-                                            return (
-                                              <td
-                                                key={`${sec.id}-${d}-${p}`}
-                                                colSpan={isDoubleStart ? 2 : 1}
-                                                className="p-1 border-b border-l border-slate-200 text-center align-middle"
-                                                style={{
-                                                  minWidth: isDoubleStart
-                                                    ? `calc(${densityConfig.cellMinWidth} * 2)`
-                                                    : densityConfig.cellMinWidth,
-                                                  height: densityConfig.cellMinHeight,
-                                                }}
-                                              >
-                                                {renderTimetableCell(entry, false, "teacher", isDoubleStart, pairedEntry)}
-                                              </td>
-                                            );
-                                          });
-                                        })}
-                                      </tr>
-                                    );
-                                  })}
+                                          const entry = activeSchedule.entries.find(
+                                            (e) => e.section_id === sec.id && e.day === d && e.period === p
+                                          );
+
+                                          let isDoubleStart = false;
+                                          let pairedEntry: TimetableEntry | undefined = undefined;
+
+                                          if (entry && mergeDoublePeriods) {
+                                            const nextP = p + 1;
+                                            if (nextP <= dayPeriods) {
+                                              const next = activeSchedule.entries.find(
+                                                (e) =>
+                                                  e.section_id === sec.id &&
+                                                  e.day === d &&
+                                                  e.period === nextP &&
+                                                  e.teacher_id === entry.teacher_id &&
+                                                  e.subject_id === entry.subject_id
+                                              );
+                                              if (next) {
+                                                isDoubleStart = true;
+                                                pairedEntry = next;
+                                                consumedPeriods.add(nextP);
+                                              }
+                                            }
+                                          }
+
+                                          return (
+                                            <td
+                                              key={`${sec.id}-${d}-${p}`}
+                                              colSpan={isDoubleStart ? 2 : 1}
+                                              className="p-1 border-b border-l border-slate-200 text-center align-middle"
+                                              style={{
+                                                minWidth: isDoubleStart
+                                                  ? `calc(${densityConfig.cellMinWidth} * 2)`
+                                                  : densityConfig.cellMinWidth,
+                                                height: densityConfig.cellMinHeight,
+                                              }}
+                                            >
+                                              {renderTimetableCell(entry, false, "teacher", isDoubleStart, pairedEntry)}
+                                            </td>
+                                          );
+                                        });
+                                      })}
+                                    </tr>
+                                  );
+                                })}
                             </tbody>
                           </table>
                         </div>
@@ -3180,7 +3067,7 @@ export default function App() {
                             </select>
                           </div>
                           <span className="text-xs font-extrabold text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
-                            جدول الفصل ({formatSection(getSectionName(selectedSectionId))})
+                            جدول الفصل ({formatSection((school.sections.find((s) => s.id === selectedSectionId) || school.sections[0])?.name || "")})
                           </span>
                         </div>
 
@@ -3188,7 +3075,7 @@ export default function App() {
                           const sec = school.sections.find((s) => s.id === selectedSectionId) || school.sections[0];
                           if (!sec) return null;
                           const maxP = Math.max(
-                            ...displayedDays.map((d) => sec.daily_period_limits?.[String(d)] ?? school.periods_per_day)
+                            ...displayedDays.map((d) => getSectionDayPeriods(school, sec, d))
                           );
 
                           // Build section subject summary
@@ -3219,7 +3106,7 @@ export default function App() {
                                   </thead>
                                   <tbody>
                                     {displayedDays.map((d) => {
-                                      const limit = sec.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                      const limit = getSectionDayPeriods(school, sec, d);
                                       const consumedPeriods = new Set<number>();
 
                                       return (
@@ -3340,7 +3227,7 @@ export default function App() {
                             </select>
                           </div>
                           <span className="text-xs font-extrabold text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
-                            جدول المعلم ({getTeacherName(selectedTeacherId)})
+                            جدول المعلم ({(school.teachers.find((t) => t.id === selectedTeacherId) || school.teachers[0])?.name || ""})
                           </span>
                         </div>
 
@@ -3348,7 +3235,7 @@ export default function App() {
                           const tch = school.teachers.find((t) => t.id === selectedTeacherId) || school.teachers[0];
                           if (!tch) return null;
                           const maxP = Math.max(
-                            ...displayedDays.map((d) => school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day)
+                            ...displayedDays.map((d) => getTeacherDayPeriods(school, tch.id, d, activeSchedule?.entries))
                           );
 
                           const teacherEntries = activeSchedule.entries.filter((e) => e.teacher_id === tch.id);
@@ -3372,7 +3259,7 @@ export default function App() {
                                   <tbody>
                                     {displayedDays.map((d) => {
                                       const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
-                                      const count = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                      const count = getTeacherDayPeriods(school, tch.id, d, activeSchedule?.entries);
                                       const consumedPeriods = new Set<number>();
 
                                       return (
@@ -3451,11 +3338,6 @@ export default function App() {
                                   <div className="flex items-center gap-2">
                                     <span className="text-base">👨‍🏫</span>
                                     <span className="font-extrabold text-sm text-slate-900">{tch.name}</span>
-                                    {tch.code && (
-                                      <span className="text-[11px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-lg border border-slate-200">
-                                        كود: {tch.code}
-                                      </span>
-                                    )}
                                   </div>
                                   <div className="flex items-center gap-2 text-xs font-bold">
                                     <span className="text-slate-600">النصاب:</span>
@@ -3487,92 +3369,75 @@ export default function App() {
         </main>
       </div>
 
-      {/* 3-STAGE FLOATING CHAT BOT (FAB) */}
-      {/* Available on mobile (< lg), and on desktop when chat sidebar is collapsed */}
-      <div className={`transition-all ${isChatCollapsed ? "block" : "lg:hidden"}`}>
-        {chatFabState === "circle" && (
-          <div className="fixed bottom-5 end-5 z-40">
-            <button
-              type="button"
-              onClick={() => setChatFabState("input_bar")}
-              className="w-14 h-14 rounded-full bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-600 hover:from-blue-600 hover:to-indigo-500 text-white shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer border-2 border-white/90 relative group"
-              title="تحدث مع وكيل الجداول الذكي"
+      {/* Executive Footer: Copyright & Creator Contact */}
+      <footer className="max-w-[1850px] mx-auto px-4 sm:px-6 pb-4 pt-1">
+        <div className="bg-[#FFFFFF] border border-[#E7E5E4] rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[#57534E]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className="font-bold text-[#1C1917]"
+              style={{ fontFamily: "'Readex Pro', 'Cairo', sans-serif" }}
             >
-              <span className="text-2xl group-hover:scale-110 transition-transform">🤖</span>
-              <span className="absolute -top-1 -start-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white" />
-            </button>
+              جدول AI
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>© {new Date().getFullYear()} جميع الحقوق محفوظة</span>
           </div>
-        )}
-
-        {chatFabState === "input_bar" && (
-          <div className="fixed bottom-4 inset-x-3 sm:inset-x-auto sm:end-5 sm:w-[480px] z-50 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-300 p-2 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-4 duration-200">
-            <button
-              type="button"
-              onClick={() => setChatFabState("circle")}
-              className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center text-sm font-bold transition shrink-0 cursor-pointer shadow-2xs"
-              title="طي شريط المحادثة"
+          <div className="flex flex-wrap items-center gap-2">
+            <span>تطوير ودعم منشئ المشروع:</span>
+            <a
+              href="https://wa.me/201039659917"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 bg-[#CCFBF1]/70 hover:bg-[#CCFBF1] text-[#0F766E] border border-[#14B8A6]/45 font-extrabold px-3 py-1 rounded-xl transition"
             >
-              ✕
-            </button>
-
-            <input
-              ref={chatBarInputRef}
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && chatInput.trim()) {
-                  handleSendChat();
-                  setChatFabState("full_sheet");
-                }
-              }}
-              placeholder="اسأل عن المدرسة والمعلمين أو اطلب تعديلاً..."
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400"
-            />
-
-            <button
-              type="button"
-              onClick={() => {
-                if (chatInput.trim()) {
-                  handleSendChat();
-                  setChatFabState("full_sheet");
-                }
-              }}
-              disabled={loading || !chatInput.trim()}
-              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow-xs"
-            >
-              <span>إرسال</span>
-              <span>🚀</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setChatFabState("full_sheet")}
-              className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center text-sm font-bold transition shrink-0 cursor-pointer shadow-2xs"
-              title="عرض المحادثة بالكامل"
-            >
-              💬
-            </button>
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12.031 2c-5.516 0-9.969 4.453-9.969 9.969 0 1.766.469 3.484 1.344 5l-1.406 5.156 5.281-1.375c1.469.797 3.109 1.219 4.75 1.219 5.516 0 9.969-4.453 9.969-9.969s-4.453-10-9.969-10zm5.828 14.125c-.25.703-1.438 1.344-1.984 1.422-.531.078-1.203.109-1.938-.125-.453-.141-1.031-.344-1.766-.656-3.094-1.328-5.109-4.453-5.266-4.656-.156-.203-1.266-1.688-1.266-3.219s.797-2.281 1.078-2.594c.281-.313.625-.391.828-.391.203 0 .406.016.594.016.188 0 .453-.078.703.531.25.609.859 2.094.938 2.25.078.156.125.344.031.547-.094.203-.141.328-.281.5-.141.172-.297.391-.422.516-.141.141-.281.297-.125.578.156.281.703 1.156 1.516 1.875 1.047.922 1.922 1.219 2.203 1.359.281.141.438.109.609-.078.172-.188.703-.828.891-1.109.188-.281.375-.234.625-.141.25.094 1.609.75 1.891.891.281.141.469.203.531.328.063.125.063.719-.188 1.422z" />
+              </svg>
+              <span>واتساب:</span>
+              <span dir="ltr" className="tabular-nums">01039659917</span>
+            </a>
           </div>
-        )}
+        </div>
+      </footer>
 
-        {chatFabState === "full_sheet" && (
-          <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200">
-            <div className="bg-white rounded-t-3xl shadow-2xl max-h-[88vh] h-[82vh] flex flex-col overflow-hidden border-t border-slate-300 w-full sm:max-w-2xl sm:mx-auto">
-              <div
-                className="p-2 flex justify-center bg-slate-100 cursor-pointer hover:bg-slate-200 transition"
-                onClick={() => setChatFabState("circle")}
-                title="إغلاق وطي المحادثة"
-              >
-                <div className="w-12 h-1.5 bg-slate-400 rounded-full" />
-              </div>
-              <div className="flex-1 min-h-0 flex flex-col">
-                {renderChatPanelContent(true)}
-              </div>
+      {/* Non-intrusive Mobile Chat Bottom Trigger & Solid WCAG AA Slide-up Sheet (< lg only) */}
+      <div className="lg:hidden sticky bottom-0 z-30 bg-[#FFFFFF] border-t border-[#E7E5E4] p-2.5 shadow-lg">
+        <button
+          type="button"
+          onClick={() => setIsMobileSheetOpen(true)}
+          className="w-full min-h-[44px] bg-[#0F766E] hover:bg-[#115E59] text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center justify-between shadow-sm transition cursor-pointer"
+        >
+          <span className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-lg bg-[#EDE9FE] text-[#8B5CF6] flex items-center justify-center text-xs" aria-hidden="true">✦</span>
+            <span>وكيل الجداول الذكي (طلب تعديل بالعامية)</span>
+          </span>
+          <span className="text-[11px] bg-[#CCFBF1] text-[#0F766E] px-2 py-0.5 rounded-md font-black">فتح المحادثة</span>
+        </button>
+      </div>
+
+      {isMobileSheetOpen && (
+        <div
+          className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end bg-[#1C1917]/65"
+          role="dialog"
+          aria-modal="true"
+          aria-label="وكيل الجداول الذكي"
+        >
+          <div className="bg-[#FFFFFF] rounded-t-3xl shadow-2xl max-h-[88vh] h-[82vh] flex flex-col overflow-hidden border-t border-[#E7E5E4] w-full">
+            <button
+              type="button"
+              className="p-2.5 flex justify-center bg-[#FAFAF9] border-b border-[#E7E5E4] cursor-pointer hover:bg-[#E7E5E4] transition"
+              onClick={() => setIsMobileSheetOpen(false)}
+              title="إغلاق وطي المحادثة"
+              aria-label="إغلاق المحادثة"
+            >
+              <div className="w-12 h-1.5 bg-[#57534E]/50 rounded-full" />
+            </button>
+            <div className="flex-1 min-h-0 flex flex-col">
+              {renderChatPanelContent(true)}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

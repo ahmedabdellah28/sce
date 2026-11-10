@@ -22,10 +22,20 @@ import {
   ALL_SCHOOL_PRESETS,
   getPresetById,
   createSchoolFromPreset,
+  expandAliasInChatMessage,
+  tryApplyDailyPeriodsChatCommand,
 } from "./presets/commonPresets.ts";
 import { GoogleGenAI } from "@google/genai";
-import { AGENT_SYSTEM_INSTRUCTION } from "./services/geminiService.ts";
+import {
+  AGENT_SYSTEM_INSTRUCTION,
+  buildSchoolExtractionPrompt,
+  enrichExtractedSchool,
+  normalizeAiExtractedSchoolJson,
+  reconcileAiWithDeterministicSchool,
+} from "./services/geminiService.ts";
+import { validateSchoolDataSchema } from "./services/apiKeyManager.ts";
 import { isQuestionOrInquiry, answerSchoolQuestion } from "./services/schoolAssistant.ts";
+import { parseUnstructuredArabicSchoolText } from "./services/unstructuredParser.ts";
 
 const PORT = 3000;
 const HOST = "0.0.0.0";
@@ -34,11 +44,30 @@ const isProduction = process.env.NODE_ENV === "production";
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-const geminiApiKey = process.env.GEMINI_API_KEY;
+// Load .env keys safely on Node server startup (supports GEMINI_API_KEY + GEMINI_API_KEY2..10)
+try {
+  const envPath = path.resolve(process.cwd(), ".env");
+  if (fs.existsSync(envPath) && typeof (process as any).loadEnvFile === "function") {
+    (process as any).loadEnvFile(envPath);
+  }
+} catch {}
+
+function collectServerGeminiKeys(): string[] {
+  const keys: string[] = [];
+  const primary = process.env.GEMINI_API_KEY?.trim();
+  if (primary) keys.push(primary);
+  for (let i = 2; i <= 10; i++) {
+    const k = process.env[`GEMINI_API_KEY${i}`]?.trim();
+    if (k && !keys.includes(k)) keys.push(k);
+  }
+  return keys;
+}
+
+const SERVER_GEMINI_KEYS = collectServerGeminiKeys();
+const geminiApiKey = SERVER_GEMINI_KEYS[0] || "";
 
 function sanitizeGeminiModel(m?: string): string {
   const model = (m || "").trim();
-  // Map outdated, deprecated or unsupported aliases to active supported ones per gemini-api skill
   if (!model || model === "gemini-flash-lite-latest" || model === "gemini-flash-lite") {
     return "gemini-3.1-flash-lite";
   }
@@ -52,33 +81,42 @@ const geminiModel = sanitizeGeminiModel(process.env.GEMINI_MODEL);
 const CANDIDATE_GEMINI_MODELS = [
   geminiModel,
   "gemini-3.1-flash-lite",
-  "gemini-3.8-flash",
 ].filter((m, i, arr) => arr.indexOf(m) === i);
 
-const genAI = geminiApiKey
-  ? new GoogleGenAI({
-      apiKey: geminiApiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
+function createServerGeminiClient(key: string) {
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build",
       },
-    })
-  : null;
+    },
+  });
+}
 
-async function generateGeminiContentWithFallback(contents: any) {
-  if (!genAI) throw new Error("No Gemini client configured");
+const genAI = geminiApiKey ? createServerGeminiClient(geminiApiKey) : null;
+
+async function generateGeminiContentWithFallback(contents: any, config?: any) {
+  if (SERVER_GEMINI_KEYS.length === 0) throw new Error("No Gemini client configured");
   let lastError: any = null;
   for (const m of CANDIDATE_GEMINI_MODELS) {
-    try {
-      const response = await genAI.models.generateContent({
-        model: m,
-        contents,
-      });
-      return { response, usedModel: m };
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`Attempt with model '${m}' failed, trying fallback:`, err?.message || err);
+    const maxAttempts = Math.min(2, SERVER_GEMINI_KEYS.length);
+    for (let kIdx = 0; kIdx < maxAttempts; kIdx++) {
+      const client = createServerGeminiClient(SERVER_GEMINI_KEYS[kIdx]);
+      try {
+        const response = await client.models.generateContent({
+          model: m,
+          contents,
+          config: {
+            ...(config || {}),
+            abortSignal: AbortSignal.timeout(12000),
+          },
+        });
+        return { response, usedModel: m };
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Attempt with key #${kIdx + 1} model '${m}' failed:`, err?.message || err);
+      }
     }
   }
   throw lastError;
@@ -238,39 +276,39 @@ app.post("/api/ai/parse", async (req: Request, res: Response) => {
     });
   }
 
-  if (genAI) {
+  if (SERVER_GEMINI_KEYS.length > 0) {
     try {
-      const { response } = await generateGeminiContentWithFallback(
-        `حول نص بيانات المدرسة التالي إلى كائن JSON صالح فقط ومطابق لهيكل SchoolData التالي:
-interface SchoolData {
-  id: string;
-  name: string;
-  academic_year: string;
-  days: number[];
-  periods_per_day: number;
-  grades: Array<{ id: string; name: string; code: string; order: number }>;
-  sections: Array<{ id: string; grade_id: string; name: string; code: string }>;
-  subjects: Array<{ id: string; name: string; code: string }>;
-  teachers: Array<{ id: string; name: string; code: string; max_daily_periods?: number; max_weekly_periods?: number; work_pattern?: any }>;
-  availabilities: Array<{ teacher_id: string; day: number; period: number; is_available: boolean }>;
-  assignments: Array<{ id: string; section_id: string; subject_id: string; teacher_id: string; weekly_periods: number }>;
-}
-أخرج JSON فقط بدون أي علامات markdown:
-${text}`,
+      const { response, usedModel } = await generateGeminiContentWithFallback(
+        buildSchoolExtractionPrompt(text),
+        {
+          responseMimeType: "application/json",
+          maxOutputTokens: 16384,
+          systemInstruction:
+            "أنت خبير متخصص في استخراج وبناء بيانات الجداول المدرسية وتحويلها إلى JSON دقيق.",
+        }
       );
       const rawTextResponse = response.text || "";
       const jsonMatch = rawTextResponse.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsedSchool = JSON.parse(jsonMatch[0]);
-        if (parsedSchool?.sections?.length > 0 && parsedSchool?.assignments?.length > 0) {
-          const analysis = InBrowserSchoolEngine.analyzeSchool(parsedSchool);
+        const candidate = normalizeAiExtractedSchoolJson(JSON.parse(jsonMatch[0]));
+        const validation = validateSchoolDataSchema(candidate);
+        if (validation.valid && validation.school) {
+          const enriched = enrichExtractedSchool(validation.school);
+          const reconciled = reconcileAiWithDeterministicSchool(enriched, text);
+          const finalSchool = reconciled.school;
+          const analysis = InBrowserSchoolEngine.analyzeSchool(finalSchool);
           return res.json({
-            school: parsedSchool,
-            normalization_notes: ["تم استخراج بيانات المدرسة باستخدام نموذج الذكاء الاصطناعي (Gemini) بنجاح."],
-            explanation: `تم فهم وتحليل بيانات "${parsedSchool.name}" بواسطة الذكاء الاصطناعي.`,
+            school: finalSchool,
+            normalization_notes: [
+              `تم استخراج بيانات "${finalSchool.name}" وتوزيع ${finalSchool.assignments.length} تكليفاً بنجاح (${usedModel}).`,
+              ...reconciled.notes,
+            ],
+            explanation: `تم فهم وتحليل بيانات "${finalSchool.name}" بنجاح.`,
             analysis,
             needs_client_ai: false,
           });
+        } else {
+          console.warn("Server Gemini schema validation warnings:", validation.errors);
         }
       }
     } catch (e) {
@@ -278,7 +316,22 @@ ${text}`,
     }
   }
 
-  const school = parsedDirect?.school || getBuiltInSchool376();
+  // Instant deterministic unstructured Arabic prose extraction (works 100% even if Gemini hits 503!)
+  const unstructured = parseUnstructuredArabicSchoolText(text);
+  if (unstructured) {
+    const analysis = InBrowserSchoolEngine.analyzeSchool(unstructured.school);
+    return res.json({
+      school: unstructured.school,
+      normalization_notes: unstructured.notes,
+      explanation: unstructured.notes[0],
+      analysis,
+      needs_client_ai: false,
+    });
+  }
+
+  const school = parsedDirect?.school && parsedDirect.school.sections.length > 0
+    ? parsedDirect.school
+    : getBuiltInSchool376();
   return res.json({
     school,
     normalization_notes: parsedDirect?.parseNotes || [],
@@ -353,7 +406,26 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
 
   // If not a query, check if deterministic mutation command interpreter recognizes it
   if (!isQuery) {
-    const cmd = interpretCommand(effectiveMessage, school, history);
+    const periodCmd = tryApplyDailyPeriodsChatCommand(school, effectiveMessage);
+    if (periodCmd) {
+      const solved = InBrowserSchoolEngine.solveInBrowser(periodCmd.school);
+      return res.json({
+        understood: true,
+        updated_school: periodCmd.school,
+        updated_markdown: generateSchoolMarkdown(periodCmd.school, periodCmd.appliedChanges),
+        applied_changes: periodCmd.appliedChanges,
+        should_solve: true,
+        reply: periodCmd.reply,
+        schedule: solved.schedule,
+        validation: solved.validation,
+        metrics: solved.metrics,
+        analysis: InBrowserSchoolEngine.analyzeSchool(periodCmd.school),
+      });
+    }
+    const normalizedForCmd = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء)\s*(?:ل)?(?:ال)?جدول/.test(effectiveMessage.trim())
+      ? "حل الجدول"
+      : expandAliasInChatMessage(school.subjects, effectiveMessage);
+    const cmd = interpretCommand(normalizedForCmd, school, history);
     if (cmd.understood) {
       let updatedSchool = school;
       let updatedMarkdown = currentMarkdown;
@@ -526,6 +598,10 @@ const server = http.createServer(app);
 
 async function start() {
   if (!isProduction) {
+    app.use((_req: Request, res: Response, nextFn) => {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      nextFn();
+    });
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true, host: HOST },

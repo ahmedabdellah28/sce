@@ -95,8 +95,8 @@ assert(
   "No glassy backdrop-blur that harms text contrast"
 );
 assert(
-  appContent.includes("bg-slate-900 text-white") && appContent.includes("bg-white rounded-2xl border border-slate-300"),
-  "High contrast accessible surfaces used for headers and cards"
+  appContent.includes("bg-[#1C1917] text-white") && appContent.includes("bg-[#FFFFFF] rounded-2xl border border-[#E7E5E4]"),
+  "High contrast accessible Warm Stone surfaces used for headers and cards"
 );
 
 console.log("\n======================================================================");

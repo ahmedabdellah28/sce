@@ -14,127 +14,43 @@ export default function TimetableDiffPreview({
 }: TimetableDiffPreviewProps) {
   if (!diff || !diff.has_changes) return null;
 
+  const summaryParts: string[] = [];
+  if (diff.moved.length > 0) summaryParts.push(`نقل ${diff.moved.length}`);
+  if (diff.added.length > 0) summaryParts.push(`إضافة ${diff.added.length}`);
+  if (diff.removed.length > 0) summaryParts.push(`إلغاء ${diff.removed.length}`);
+
   return (
-    <div className="bg-white rounded-2xl border-2 border-blue-500 shadow-md p-4 space-y-3 animate-fade-in text-start">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">🔍</span>
-          <div>
-            <h3 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
-              معاينة التعديلات
-              <span className="text-[10px] bg-blue-100 text-blue-900 px-2 py-0.5 rounded-full font-bold">
-                تثبيت السليم
-              </span>
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              تغييرات مقترحة مع الحفاظ على {diff.unchanged_count} حصة ثابتة
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onDiscard}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer"
-          >
-            إلغاء
-          </button>
-
-          <button
-            type="button"
-            onClick={onApply}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs px-4 py-1.5 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <span>✅</span>
-            <span>تطبيق التعديلات</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Changes Summary Pills */}
-      <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-        {diff.moved.length > 0 && (
-          <span className="bg-blue-50 text-blue-900 border border-blue-300 px-2.5 py-1 rounded-lg flex items-center gap-1">
-            <span>↔️</span>
-            <span>تم نقل {diff.moved.length} حصة</span>
+    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[#EDE9FE]/65 border border-[#8B5CF6]/45 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-[#6D28D9] font-extrabold">
+        <span className="inline-block w-2 h-2 rounded-full bg-[#8B5CF6] shrink-0" aria-hidden="true" />
+        <span>معاينة التعديلات على الجدول</span>
+        {summaryParts.length > 0 && (
+          <span className="text-[11px] font-bold bg-[#FFFFFF] text-[#6D28D9] border border-[#8B5CF6]/30 px-2 py-0.5 rounded-md tabular-nums">
+            {summaryParts.join(" · ")}
           </span>
         )}
-
-        {diff.added.length > 0 && (
-          <span className="bg-emerald-50 text-emerald-900 border border-emerald-300 px-2.5 py-1 rounded-lg flex items-center gap-1">
-            <span>➕</span>
-            <span>تم إضافة {diff.added.length} حصة</span>
-          </span>
-        )}
-
-        {diff.removed.length > 0 && (
-          <span className="bg-rose-50 text-rose-900 border border-rose-300 px-2.5 py-1 rounded-lg flex items-center gap-1">
-            <span>➖</span>
-            <span>تم إلغاء {diff.removed.length} حصة</span>
-          </span>
-        )}
-
-        <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg font-bold ms-auto text-[11px]">
-          {diff.unchanged_count} حصة مستقرة دون تغيير
+        <span className="text-[11px] font-semibold text-[#57534E] tabular-nums">
+          ({diff.unchanged_count} ثابتة)
         </span>
       </div>
 
-      {/* Changes Detailed List */}
-      <div className="max-h-48 overflow-y-auto space-y-1.5 pe-1">
-        {diff.moved.map((item, idx) => (
-          <div
-            key={`move_${idx}`}
-            className="p-2 rounded-lg bg-blue-50/60 border border-blue-200 text-[11px] text-blue-950 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-blue-700">[نقل]</span>
-              <span className="font-bold">{item.subject_name}</span>
-              <span className="text-slate-600">({item.section_name})</span>
-              <span className="text-slate-500">• {item.teacher_name}</span>
-            </div>
-            <div className="flex items-center gap-1 text-[10px] font-bold text-slate-600 dir-ltr">
-              <span className="bg-white border rounded px-1.5 py-0.5">يوم {item.from?.day} ح{item.from?.period}</span>
-              <span>➔</span>
-              <span className="bg-blue-600 text-white rounded px-1.5 py-0.5">يوم {item.to?.day} ح{item.to?.period}</span>
-            </div>
-          </div>
-        ))}
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onApply}
+          className="bg-[#0F766E] hover:bg-[#115E59] text-white font-extrabold text-[11px] px-2.5 py-1 rounded-lg shadow-2xs transition flex items-center gap-1 cursor-pointer"
+        >
+          <span>✓</span>
+          <span>تأكيد</span>
+        </button>
 
-        {diff.added.map((item, idx) => (
-          <div
-            key={`add_${idx}`}
-            className="p-2 rounded-lg bg-emerald-50/60 border border-emerald-200 text-[11px] text-emerald-950 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-emerald-700">[إضافة +]</span>
-              <span className="font-bold">{item.subject_name}</span>
-              <span className="text-slate-600">({item.section_name})</span>
-              <span className="text-slate-500">• {item.teacher_name}</span>
-            </div>
-            <span className="text-[10px] font-bold bg-emerald-600 text-white rounded px-1.5 py-0.5">
-              يوم {item.to?.day} ح{item.to?.period}
-            </span>
-          </div>
-        ))}
-
-        {diff.removed.map((item, idx) => (
-          <div
-            key={`rem_${idx}`}
-            className="p-2 rounded-lg bg-rose-50/60 border border-rose-200 text-[11px] text-rose-950 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-rose-700">[إلغاء -]</span>
-              <span className="font-bold">{item.subject_name}</span>
-              <span className="text-slate-600">({item.section_name})</span>
-              <span className="text-slate-500">• {item.teacher_name}</span>
-            </div>
-            <span className="text-[10px] font-bold bg-rose-600 text-white rounded px-1.5 py-0.5">
-              يوم {item.from?.day} ح{item.from?.period}
-            </span>
-          </div>
-        ))}
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] border border-[#E7E5E4] font-bold text-[11px] px-2.5 py-1 rounded-lg transition cursor-pointer"
+        >
+          تراجع
+        </button>
       </div>
     </div>
   );

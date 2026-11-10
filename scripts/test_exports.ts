@@ -44,9 +44,11 @@ async function runExportTests() {
   assert(pdfMaster.includes("<!DOCTYPE html>"), "PDF Master has <!DOCTYPE html>");
   assert(pdfMaster.includes("family=Cairo"), "PDF Master includes Cairo Arabic font");
   assert(pdfMaster.includes("الجدول العام الشامل للمدرسة"), "PDF Master title is correct");
-  assert(pdfMaster.includes("palette-legend"), "PDF Master includes palette legend bar");
-  assert(pdfMaster.includes("وزارة التربية والتعليم والتعليم الفني"), "PDF Master includes official ministry header");
-  assert(pdfMaster.includes("يعتمد مدير المدرسة"), "PDF Master includes official director signature box");
+  assert(!pdfMaster.includes("palette-legend") && !pdfMaster.includes("دليل ألوان الفصول"), "PDF Master omits clutter color legend bar");
+  assert(!pdfMaster.includes("وزارة التربية والتعليم والتعليم الفني") && !pdfMaster.includes("جمهورية مصر العربية"), "PDF Master omits cluttered ministry header");
+  assert(!pdfMaster.includes("يعتمد مدير المدرسة"), "PDF Master omits top signatures clutter");
+  assert(!pdfMaster.includes('class="cell-sub"'), "PDF Master cells show section code ONLY (no subject name)");
+  assert(pdfMaster.includes("master-sheet") && pdfMaster.includes("fitMasterToSinglePage") && pdfMaster.includes("break-inside: avoid"), "PDF Master enforces single-page fit");
   assert(pdfMaster.includes("background:"), "PDF Master includes section color backgrounds");
 
   const pdfSections = InBrowserSchoolEngine.exportPrintablePDF(demoSchool, resDemo.schedule, "sections");
@@ -101,7 +103,7 @@ async function runExportTests() {
 
   const modelPdf = InBrowserSchoolEngine.exportPrintablePDF(modelSchool, modelSolved.schedule, "all");
   assert(modelPdf.includes(modelSchool.name), `Model PDF includes school name: ${modelSchool.name}`);
-  assert(modelPdf.includes("palette-legend"), "Model PDF includes palette legend");
+  assert(!modelPdf.includes("palette-legend"), "Model PDF cleanly omits palette legend");
 
   const modelExcel = InBrowserSchoolEngine.exportExcelWorkbook(modelSchool, modelSolved.schedule);
   assert(modelExcel.includes(modelSchool.name), `Model Excel includes school name: ${modelSchool.name}`);

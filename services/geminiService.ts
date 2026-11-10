@@ -24,6 +24,8 @@ import {
   ALL_SCHOOL_PRESETS,
   getPresetById,
   createSchoolFromPreset,
+  expandAliasInChatMessage,
+  tryApplyDailyPeriodsChatCommand,
 } from "../presets/commonPresets.ts";
 import {
   ApiKeyManager,
@@ -33,13 +35,174 @@ import {
   validateSchoolDataSchema,
 } from "./apiKeyManager.ts";
 import { isQuestionOrInquiry, answerSchoolQuestion } from "./schoolAssistant.ts";
+import { parseUnstructuredArabicSchoolText } from "./unstructuredParser.ts";
 
 export const DEFAULT_BACKEND_URL = "";
+
+export function buildSchoolExtractionPrompt(rawSchoolText: string): string {
+  return `أنت خبير استخراج بيانات الجداول المدرسية. حوّل النص التالي (ولو كان مكتوباً بالعامية أو غير منظم) إلى كائن JSON واحد فقط مطابق بدقة لهيكل SchoolData التالي:
+
+قواعد الاستخراج الإلزامية:
+1. اسم المدرسة (name): استخرج الاسم الدقيق من النص (مثل "مدرسة الجمالية الإعدادية").
+2. أيام الدراسة (days): استخدم ترقيم النظام المعتمد حصراً:
+   - السبت = 6
+   - الأحد = 0
+   - الاثنين = 1
+   - الثلاثاء = 2
+   - الأربعاء = 3
+   - الخميس = 4
+   مثال من السبت للخميس: [6, 0, 1, 2, 3, 4]. من الأحد للخميس: [0, 1, 2, 3, 4].
+3. عدد الحصص اليومية (periods_per_day): العدد الافتراضي الأقصى يومياً. وإذا ذُكر يوم مخفف لصف معين (مثل "أولى إعدادي يوم الخميس 5 حصص فقط") ضع daily_period_limits على هذا الصف وفصوله: { "4": 5 }.
+4. الفصول (sections): كل فصل له id فريد (مثل "SEC_1_1")، وgrade_id يطابق grade.id، وname وcode مثل "1/1".
+5. المواد (subjects): استخرج كل مادة مذكورة باسم واضح وid فريد (مثل "SUB_AR") ولا تنس مادة الدين أو الأنشطة أو المواد الفرعية مثل (عربي2) إن وجدت، وكذلك التعليم العام واللغات (Math, Science, Connect Plus, المستوى الرفيع) والأزهر (القرآن الكريم، الفقه، التفسير، الحديث، التوحيد، النحو، الصرف، البلاغة) والثانوي (العلوم المتكاملة، الفيزياء، الكيمياء، الأحياء، الجيولوجيا، التاريخ، الجغرافيا، الفلسفة، الإحصاء) والابتدائي المطور (اكتشف، القيم، التوكاتسو، المهارات المهنية). إذا درّس المعلم الواحد أكثر من مادة (مثل: عربي + دين)، أضف المادتين وكل تكليفاتهما كاملة!
+6. المعلمون والخانات الشاغرة (teachers): استخرج كل معلم مذكور باسمه:
+   - **مهم جداً — الخانات الشاغرة ("س"، "س1"، "س2"، "س3"، "س دراسات")**: في المدارس المصرية الحرف "س" (سواء منفرداً أو متبوعاً برقم مثل "س1، س2، س3" أو متبوعاً باسم المادة مثل "س عربي، س دين، س دراسات، س رياضيات") يعني **خانة شاغرة / احتياج معلم** ويدرّس تلك المادة. احتفظ بكل منها كمعلم مستقل كامل التكليفات وسمّه بوضوح مثل "س1 (شاغر)"، "س عربي (شاغر)"، "س دين (شاغر)"، "س دراسات (شاغر)" بدون استخدام كلمة "عجز" ولا تحذفها أو تدمجها أبداً!
+   - الإجازات وأيام العمل: سواء ذُكرت كإجازة ("واخد إجازة التلات والاربع والخميس") أو كأيام حضور ("بتيجي سبت واحد واتنين" / "لا يعمل غير الأربعاء")، ضع جميع أيام الغياب في work_pattern.day_rules كـ "MANDATORY_OFF".
+   - حصص متأخرة / أخيرة: أضف في work_pattern.placement_rules: { "day": null, "placement_type": "LAST_N", "n_periods": 2, "is_hard": true }.
+   - تجنب الحصة الأولى ("متتحطش في الأول"): أضف { "day": null, "placement_type": "AVOID_FIRST", "n_periods": 1, "is_hard": true }.
+   - حد حصص يومي ("مينفعش تاخد غير حصتين يوم الاربع"): أضف في work_pattern.daily_period_rules: { "day": 3, "rule_type": "MAX", "count": 2, "is_hard": true, "weight": 10 }.
+   - إذا ذُكر مزدوجة للمعلم ضع force_double_periods: true. إذا ذُكر حد التتابع العام (مثل 3 حصص) ضع max_consecutive_periods على كل معلم.
+7. الإسنادات والملاحظات (assignments) — مهم جداً:
+   - يمكنك وضع section_ids مصفوفة للفصول المتماثلة لنفس المعلم والمادة والعدد:
+     { "teacher_id": "TCH_YASSER", "subject_id": "SUB_COMP", "section_ids": ["SEC_1_1","SEC_1_2","SEC_1_3","SEC_1_4","SEC_2_1","SEC_2_2","SEC_3_1","SEC_3_2"], "weekly_periods": 1 }
+   - انتبه للملاحظات التكميلية مثل "(ملاحظة: فصل 1/1 فاضله 3 حصص دين ممكن نديهم لـ س3)" وقم بإضافة تكليفها حتى يكتمل نصاب كل فصل تماماً ولا تسقط أي مادة مثل الدين أو الأنشطة!
+
+الهيكل المطلوب (JSON فقط):
+{
+  "id": "sch_ai_1",
+  "name": "string",
+  "academic_year": "2025/2026",
+  "days": [6, 0, 1, 2, 3, 4],
+  "periods_per_day": 6,
+  "grades": [{ "id": "G1", "name": "الأول الإعدادي", "code": "G1", "order": 1, "daily_period_limits": {} }],
+  "sections": [{ "id": "SEC_1_1", "grade_id": "G1", "name": "1/1", "code": "1/1", "daily_period_limits": {} }],
+  "subjects": [{ "id": "SUB_1", "name": "عربي", "code": "عربي", "double_period_policy": "FREE" }],
+  "teachers": [{
+    "id": "TCH_1",
+    "name": "string",
+    "code": "string",
+    "subject_ids": ["SUB_1"],
+    "max_daily_periods": 6,
+    "max_weekly_periods": 24,
+    "max_consecutive_periods": 3,
+    "force_double_periods": false,
+    "work_pattern": { "day_rules": {}, "daily_period_rules": [], "placement_rules": [] }
+  }],
+  "availabilities": [],
+  "assignments": [{ "section_ids": ["SEC_1_1"], "subject_id": "SUB_1", "teacher_id": "TCH_1", "weekly_periods": 6 }]
+}
+
+نص بيانات المدرسة:
+${rawSchoolText}`;
+}
+
+export function normalizeAiExtractedSchoolJson(candidate: any): any {
+  if (!candidate || typeof candidate !== "object") return candidate;
+  const allSectionIds: string[] = Array.isArray(candidate.sections)
+    ? candidate.sections.map((sec: any) => String(sec?.id || "")).filter(Boolean)
+    : [];
+
+  const expanded: any[] = [];
+  if (Array.isArray(candidate.assignments)) {
+    let idx = 1;
+    for (const rawAsgn of candidate.assignments) {
+      if (!rawAsgn || typeof rawAsgn !== "object") continue;
+      const wp = Number(rawAsgn.weekly_periods) || 1;
+      let targetSecs: string[] = [];
+      if (Array.isArray(rawAsgn.section_ids)) {
+        targetSecs = rawAsgn.section_ids.map((x: any) => String(x)).filter(Boolean);
+      } else if (rawAsgn.section_id === "ALL") {
+        targetSecs = allSectionIds;
+      } else if (rawAsgn.section_id) {
+        targetSecs = [String(rawAsgn.section_id)];
+      }
+      for (const secId of targetSecs) {
+        expanded.push({
+          id: rawAsgn.id && targetSecs.length === 1 ? String(rawAsgn.id) : `ASG_AI_${idx++}`,
+          section_id: secId,
+          subject_id: String(rawAsgn.subject_id || ""),
+          teacher_id: String(rawAsgn.teacher_id || ""),
+          weekly_periods: wp,
+        });
+      }
+    }
+  }
+
+  return {
+    ...candidate,
+    assignments: expanded,
+  };
+}
+
+export function enrichExtractedSchool(school: SchoolData): SchoolData {
+  const teachersWithSubjects = school.teachers.map((t) => {
+    const inferred = new Set<string>(t.subject_ids || []);
+    for (const a of school.assignments) {
+      if (a.teacher_id === t.id && a.subject_id) inferred.add(a.subject_id);
+    }
+    return {
+      ...t,
+      subject_ids: Array.from(inferred),
+    };
+  });
+  return {
+    ...school,
+    teachers: teachersWithSubjects,
+  };
+}
+
+/**
+ * Cross-checks Gemini LLM extraction against our deterministic unstructured Arabic parser.
+ * Guarantees Gemini never silently drops deficit teachers ("س1", "س2", "س3", "س دراسات"),
+ * subjects (like "دين"), missing note assignments, or teacher off-day/placement constraints.
+ */
+export function reconcileAiWithDeterministicSchool(
+  aiSchool: SchoolData,
+  rawText: string
+): { school: SchoolData; notes: string[] } {
+  const det = parseUnstructuredArabicSchoolText(rawText);
+  if (!det) return { school: aiSchool, notes: [] };
+  const detSchool = det.school;
+
+  const aiTotalPeriods = aiSchool.assignments.reduce((s, a) => s + (a.weekly_periods || 0), 0);
+  const detTotalPeriods = detSchool.assignments.reduce((s, a) => s + (a.weekly_periods || 0), 0);
+  const aiOffCount = aiSchool.teachers.reduce(
+    (s, t) => s + Object.values(t.work_pattern?.day_rules || {}).filter((v) => v === "MANDATORY_OFF").length,
+    0
+  );
+  const detOffCount = detSchool.teachers.reduce(
+    (s, t) => s + Object.values(t.work_pattern?.day_rules || {}).filter((v) => v === "MANDATORY_OFF").length,
+    0
+  );
+  const aiHasDeficitMarkers = aiSchool.teachers.some((t) => t.name.includes("شاغر") || t.name.includes("عجز") || /(?:^|\s)س\s*(?:\d*|[\u0600-\u06FF]+)/.test(t.name));
+  const detHasDeficitMarkers = detSchool.teachers.some((t) => t.name.includes("شاغر") || t.name.includes("عجز"));
+
+  const missingSubjectsOrTeachers =
+    detSchool.subjects.length > aiSchool.subjects.length ||
+    detSchool.teachers.length > aiSchool.teachers.length ||
+    detTotalPeriods > aiTotalPeriods ||
+    detOffCount > aiOffCount ||
+    (detHasDeficitMarkers && !aiHasDeficitMarkers);
+
+  if (missingSubjectsOrTeachers) {
+    return {
+      school: {
+        ...detSchool,
+        name: aiSchool.name && aiSchool.name.length >= 4 && aiSchool.name !== "مدرسة جديدة" ? aiSchool.name : detSchool.name,
+      },
+      notes: [
+        `تم استكمال البيانات والتأكد من عدم إسقاط أي مادة (مثل الدين) أو الخانات الشاغرة (س1/س2) أو قيود المعلمين (${detSchool.sections.length} فصول، ${detSchool.teachers.length} معلماً، ${detTotalPeriods} حصة).`,
+      ],
+    };
+  }
+  return { school: aiSchool, notes: [] };
+}
 
 export const AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Role & Identity)
 أنت "وكيل ومستشار الجداول المدرسية الذكي (School Timetable AI Copilot & Consultant)".
 لديك وصول كامل ومباشر إلى كائن المدرسة وهيكل البيانات والمعلمين والأنصبة والجدول الحالي.
 تتفاعل مع المستخدم كشات دردشة ذكي ومرن باللغة العربية، وتفهم جميع اللهجات (المصرية، الخليجية، الفصحى).
+تفهم مصطلحات المدارس المصرية بدقة: "س" أو "س1" أو "س2" أو "س" متبوعة باسم المادة (مثل "س عربي" أو "س دين" أو "س دراسات") تعني خانة شاغرة مؤقتة (احتياج معلم غير معين حالياً) ويجب ذكرها وحساب حصصها بوضوح عند السؤال عن الشواغر أو الاحتياج أو الأنصبة، دون استخدام كلمة "عجز".
 
 # أوضاع العمل التفاعلية (Operational Modes)
 1. وضع الدردشة والإجابة والاستفسارات (Conversational & Q&A Mode):
@@ -240,25 +403,10 @@ export class HybridSchoolService {
           async (client) => {
             const response = await client.models.generateContent({
               model: DEFAULT_GEMINI_MODEL,
-              contents: `حول نص بيانات المدرسة التالي إلى JSON مطابق لهيكل SchoolData التالي:
-interface SchoolData {
-  id: string;
-  name: string;
-  academic_year: string;
-  days: number[];
-  periods_per_day: number;
-  grades: Array<{ id: string; name: string; code: string; order: number }>;
-  sections: Array<{ id: string; grade_id: string; name: string; code: string }>;
-  subjects: Array<{ id: string; name: string; code: string }>;
-  teachers: Array<{ id: string; name: string; code: string; max_daily_periods?: number; max_weekly_periods?: number; work_pattern?: any }>;
-  availabilities: Array<{ teacher_id: string; day: number; period: number; is_available: boolean }>;
-  assignments: Array<{ id: string; section_id: string; subject_id: string; teacher_id: string; weekly_periods: number }>;
-}
-
-نص بيانات المدرسة:
-${text}`,
+              contents: buildSchoolExtractionPrompt(text),
               config: {
                 responseMimeType: "application/json",
+                maxOutputTokens: 16384,
                 systemInstruction:
                   "أنت خبير متخصص في استخراج وبناء بيانات الجداول المدرسية وتحويلها إلى JSON دقيق.",
               },
@@ -268,17 +416,21 @@ ${text}`,
           { onNotice: this.onKeyNotice }
         );
 
-        const candidate = JSON.parse(rawJsonText);
+        const candidate = normalizeAiExtractedSchoolJson(JSON.parse(rawJsonText));
         const validation = validateSchoolDataSchema(candidate);
         if (validation.valid && validation.school) {
-          const analysis = InBrowserSchoolEngine.analyzeSchool(validation.school);
+          const enriched = enrichExtractedSchool(validation.school);
+          const reconciled = reconcileAiWithDeterministicSchool(enriched, text);
+          const finalSchool = reconciled.school;
+          const analysis = InBrowserSchoolEngine.analyzeSchool(finalSchool);
           return {
-            school: validation.school,
+            school: finalSchool,
             normalization_notes: [
               `تم استخراج هيكل المدرسة والتحقق من صحته عبر مفتاح "${usedKey.alias}" (${usedKey.masked}).`,
+              ...reconciled.notes,
               ...notices,
             ],
-            explanation: `تم تحليل بيانات "${validation.school.name}" بواسطة Gemini (${usedKey.masked}) بنجاح.`,
+            explanation: `تم تحليل بيانات "${finalSchool.name}" بنجاح.`,
             analysis,
           };
         } else {
@@ -299,7 +451,19 @@ ${text}`,
       }
     }
 
-    // 3. Deterministic fallback
+    // 3. Deterministic unstructured Arabic prose fallback (handles human freeform notes offline & on 503!)
+    const unstructured = parseUnstructuredArabicSchoolText(text);
+    if (unstructured) {
+      return {
+        school: unstructured.school,
+        normalization_notes: unstructured.notes,
+        unparsed_notes: [],
+        explanation: unstructured.notes[0],
+        analysis: InBrowserSchoolEngine.analyzeSchool(unstructured.school),
+      };
+    }
+
+    // 4. Final fallback
     const school =
       parsed?.school && parsed.school.sections.length > 0 ? parsed.school : getBuiltInSchool376();
     return {
@@ -386,7 +550,21 @@ ${text}`,
     // 2. In-browser deterministic command interpreter (for mutations/commands)
     const isQuery = isQuestionOrInquiry(message);
     if (!isQuery) {
-      const cmd = interpretCommand(message, school, history);
+      const periodCmd = tryApplyDailyPeriodsChatCommand(school, message);
+      if (periodCmd) {
+        return {
+          updated_school: periodCmd.school,
+          updated_markdown: generateSchoolMarkdown(periodCmd.school, periodCmd.appliedChanges),
+          applied_changes: periodCmd.appliedChanges,
+          should_solve: true,
+          reply: periodCmd.reply,
+          analysis: InBrowserSchoolEngine.analyzeSchool(periodCmd.school),
+        };
+      }
+      const normalizedForCmd = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء)\s*(?:ل)?(?:ال)?جدول/.test(message.trim())
+        ? "حل الجدول"
+        : expandAliasInChatMessage(school.subjects, message);
+      const cmd = interpretCommand(normalizedForCmd, school, history);
       if (cmd.understood) {
         let updatedSchool = school;
         let updatedMarkdown = markdown || "";
@@ -483,6 +661,7 @@ ${message}
               contents,
               config: {
                 responseMimeType: "application/json",
+                maxOutputTokens: 16384,
                 systemInstruction: AGENT_SYSTEM_INSTRUCTION,
               },
             });

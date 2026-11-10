@@ -49,7 +49,9 @@ const ALLOWLIST_FILES: string[] = [
   "presets/json/preset_prep_lang_35.json",
   "presets/json/preset_sec_gov_35.json",
   // Components
+  "components/JadwalLogo.tsx",
   "components/SchoolWizardStepper.tsx",
+  "components/TeacherManagementHub.tsx",
   "components/TimetableDiffPreview.tsx",
   // Public anonymized test fixtures ONLY
   "fixtures/demo_prep_school.md",
@@ -62,9 +64,11 @@ const ALLOWLIST_FILES: string[] = [
   "services/geminiService.ts",
   "services/localEngine.ts",
   "services/scheduler.test.ts",
+  "services/schoolAssistant.ts",
   "services/schoolCore.ts",
   "services/schoolTemplates.ts",
   "services/solver.ts",
+  "services/unstructuredParser.ts",
   // Official test & builder scripts ONLY
   "scripts/test_presets_integrity.ts",
   "scripts/test_wizard_stepper.ts",

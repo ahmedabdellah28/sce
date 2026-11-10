@@ -16,18 +16,6 @@ interface TeacherManagementHubProps {
   onSelectTeacherId?: (teacherId: string) => void;
 }
 
-const COMMON_EGYPTIAN_SUBJECTS = [
-  { name: "اللغة العربية", defaultPeriods: 6, code: "عربي", color: "bg-blue-50 text-blue-700 border-blue-200" },
-  { name: "الرياضيات", defaultPeriods: 5, code: "رياضيات", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  { name: "العلوم", defaultPeriods: 4, code: "علوم", color: "bg-amber-50 text-amber-700 border-amber-200" },
-  { name: "الدراسات الاجتماعية", defaultPeriods: 3, code: "دراسات", color: "bg-purple-50 text-purple-700 border-purple-200" },
-  { name: "اللغة الإنجليزية", defaultPeriods: 4, code: "إنجليزي", color: "bg-rose-50 text-rose-700 border-rose-200" },
-  { name: "التربية الدينية", defaultPeriods: 2, code: "دين", color: "bg-teal-50 text-teal-700 border-teal-200" },
-  { name: "الحاسب الآلي", defaultPeriods: 2, code: "حاسب", color: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  { name: "التربية الفنية", defaultPeriods: 2, code: "رسم", color: "bg-pink-50 text-pink-700 border-pink-200" },
-  { name: "التربية الرياضية", defaultPeriods: 2, code: "ألعاب", color: "bg-orange-50 text-orange-700 border-orange-200" },
-];
-
 export default function TeacherManagementHub({
   school,
   onUpdateSchool,
@@ -35,7 +23,6 @@ export default function TeacherManagementHub({
   selectedTeacherId: externalSelectedId,
   onSelectTeacherId,
 }: TeacherManagementHubProps) {
-  // Search & Selection State
   const [searchQuery, setSearchQuery] = useState("");
   const [internalSelectedTeacherId, setInternalSelectedTeacherId] = useState<string>(() => {
     return externalSelectedId || school.teachers[0]?.id || "";
@@ -52,27 +39,55 @@ export default function TeacherManagementHub({
     if (onSelectTeacherId) onSelectTeacherId(id);
   }
 
-  // Quick Assignment Studio State
-  const [selectedSubjectName, setSelectedSubjectName] = useState("اللغة العربية");
-  const [customSubjectInput, setCustomSubjectInput] = useState("");
-  const [selectedSectionIds, setSelectedSectionIds] = useState<string[]>([]);
-  const [weeklyPeriods, setWeeklyPeriods] = useState<number>(6);
+  // Inline Add Teacher State (Name + Subject + Weekly Quota — no code shown to user)
+  const [showAddTeacherBox, setShowAddTeacherBox] = useState(false);
+  const [newTeacherNameInput, setNewTeacherNameInput] = useState("");
+  const [newTeacherSubjectId, setNewTeacherSubjectId] = useState<string>(() => school.subjects[0]?.id || "");
+  const [newTeacherQuota, setNewTeacherQuota] = useState<number>(24);
+
+  // Active Subject in Assignment Studio
+  const [activeSubjectId, setActiveSubjectId] = useState<string>("");
+  const [showAllSubjects, setShowAllSubjects] = useState<boolean>(false);
   const [actionSuccessNotice, setActionSuccessNotice] = useState<string | null>(null);
 
-  // New Teacher Inline State
-  const [newTeacherNameInput, setNewTeacherNameInput] = useState("");
-  const [showAddTeacherBox, setShowAddTeacherBox] = useState(false);
+  // Helper: infer teacher specialty from explicit subject_ids or existing assignments
+  function getTeacherSubjectIds(t: Teacher): string[] {
+    if (t.subject_ids && t.subject_ids.length > 0) return t.subject_ids;
+    const inferred = new Set<string>();
+    for (const a of school.assignments) {
+      if (a.teacher_id === t.id && a.subject_id) inferred.add(a.subject_id);
+    }
+    return Array.from(inferred);
+  }
 
-  // Filtered teachers list by name or code
+  const selectedTeacherSubjIds = useMemo(() => {
+    if (!selectedTeacher) return [];
+    return getTeacherSubjectIds(selectedTeacher);
+  }, [selectedTeacher, school.assignments]);
+
+  const effectiveSubjectId = useMemo(() => {
+    if (activeSubjectId && school.subjects.some((s) => s.id === activeSubjectId)) {
+      if (showAllSubjects || selectedTeacherSubjIds.length === 0 || selectedTeacherSubjIds.includes(activeSubjectId)) {
+        return activeSubjectId;
+      }
+    }
+    return selectedTeacherSubjIds[0] || school.subjects[0]?.id || "";
+  }, [activeSubjectId, school.subjects, showAllSubjects, selectedTeacherSubjIds]);
+
+  // Filtered teachers list (search by name or specialty subject)
   const filteredTeachers = useMemo(() => {
     const q = normAr(searchQuery.trim());
     if (!q) return school.teachers;
-    return school.teachers.filter(
-      (t) => normAr(t.name).includes(q) || normAr(t.code || "").includes(q)
-    );
-  }, [school.teachers, searchQuery]);
+    return school.teachers.filter((t) => {
+      if (normAr(t.name).includes(q)) return true;
+      const subjNames = getTeacherSubjectIds(t)
+        .map((sid) => school.subjects.find((sub) => sub.id === sid)?.name || "")
+        .join(" ");
+      return normAr(subjNames).includes(q);
+    });
+  }, [school.teachers, school.subjects, school.assignments, searchQuery]);
 
-  // Map each teacher to their assigned periods and sections
+  // Map each teacher to their assigned periods, assignments, and sections
   const teacherLoadMap = useMemo(() => {
     const map = new Map<string, { totalPeriods: number; assignments: TeachingAssignment[]; sections: Section[] }>();
     for (const t of school.teachers) {
@@ -92,71 +107,40 @@ export default function TeacherManagementHub({
     return map;
   }, [school.teachers, school.assignments, school.sections]);
 
-  // All available subjects in the school + standard common subjects
-  const allSubjectSuggestions = useMemo(() => {
-    const names = new Set<string>();
-    for (const s of school.subjects) names.add(s.name);
-    for (const s of COMMON_EGYPTIAN_SUBJECTS) names.add(s.name);
-    return Array.from(names);
-  }, [school.subjects]);
-
-  // When subject changes, suggest optimal period count
-  function handleChooseSubject(subName: string) {
-    setSelectedSubjectName(subName);
-    const standard = COMMON_EGYPTIAN_SUBJECTS.find((s) => normAr(s.name) === normAr(subName));
-    if (standard) {
-      setWeeklyPeriods(standard.defaultPeriods);
-    } else {
-      // Look if existing assignment has period count
-      const existing = school.assignments.find((a) => {
-        const sub = school.subjects.find((s) => s.id === a.subject_id);
-        return sub && normAr(sub.name) === normAr(subName);
+  function getSubjectDefaultPeriodsForSection(sectionId: string, subjectId: string): number {
+    const existing = school.assignments.find((a) => a.section_id === sectionId && a.subject_id === subjectId);
+    if (existing && existing.weekly_periods > 0) return existing.weekly_periods;
+    const sec = school.sections.find((s) => s.id === sectionId);
+    if (sec) {
+      const sameGradeAsgn = school.assignments.find((a) => {
+        const otherSec = school.sections.find((sItem) => sItem.id === a.section_id);
+        return otherSec?.grade_id === sec.grade_id && a.subject_id === subjectId && a.weekly_periods > 0;
       });
-      if (existing) {
-        setWeeklyPeriods(existing.weekly_periods);
-      }
+      if (sameGradeAsgn) return sameGradeAsgn.weekly_periods;
     }
+    const anySubjAsgn = school.assignments.find((a) => a.subject_id === subjectId && a.weekly_periods > 0);
+    return anySubjAsgn?.weekly_periods || 4;
   }
 
-  // Toggle section selection
-  function toggleSection(secId: string) {
-    setSelectedSectionIds((prev) =>
-      prev.includes(secId) ? prev.filter((id) => id !== secId) : [...prev, secId]
-    );
-  }
-
-  function selectAllSections() {
-    setSelectedSectionIds(school.sections.map((s) => s.id));
-  }
-
-  function selectGradeSections(gradePrefix: string) {
-    setSelectedSectionIds(
-      school.sections
-        .filter((s) => s.name.startsWith(`${gradePrefix}/`) || s.code.startsWith(`${gradePrefix}/`) || s.grade_id.includes(gradePrefix))
-        .map((s) => s.id)
-    );
-  }
-
-  function clearSectionSelection() {
-    setSelectedSectionIds([]);
-  }
-
-  // Add new teacher directly
   function handleAddNewTeacher() {
-    const raw = newTeacherNameInput.trim();
-    if (!raw) return;
-    const clean = raw.replace(/^(?:ال)?(?:[أإآا]?ستاذ|[أإآا]?ستاذه|معلم|معلمه|مدرس|مدرسه|مستر|أ\.)\s+/, "").trim();
+    const clean = newTeacherNameInput.trim();
     if (!clean) return;
-
     if (school.teachers.some((t) => normAr(t.name) === normAr(clean))) {
-      setActionSuccessNotice(`المعلم "${clean}" موجود بالفعل.`);
+      setActionSuccessNotice(`المعلم "${clean}" مسجل بالفعل.`);
       return;
     }
 
+    const subjId = newTeacherSubjectId || school.subjects[0]?.id;
+    const newId = `TCH_${Date.now().toString(36)}_${school.teachers.length + 1}`;
+    const autoCode = clean.split(" ")[0] || `م${school.teachers.length + 1}`;
     const newTeacher: Teacher = {
-      id: `TCH_${school.teachers.length + 1}_${Date.now().toString(36)}`,
+      id: newId,
       name: clean,
-      code: clean.split(" ")[0] || clean,
+      code: autoCode,
+      subject_ids: subjId ? [subjId] : [],
+      max_daily_periods: 7,
+      max_weekly_periods: Math.max(1, newTeacherQuota || 24),
+      max_consecutive_periods: 2,
       work_pattern: { day_rules: {}, daily_period_rules: [], placement_rules: [] },
     };
 
@@ -165,84 +149,66 @@ export default function TeacherManagementHub({
       teachers: [...school.teachers, newTeacher],
     };
 
-    onUpdateSchool(updatedSchool, `تمت إضافة المعلم "${clean}" بنجاح.`);
+    onUpdateSchool(updatedSchool, `تمت إضافة "${clean}" وتحديد مادته بنجاح.`);
     setNewTeacherNameInput("");
     setShowAddTeacherBox(false);
     handleSelectTeacher(newTeacher.id);
+    if (subjId) setActiveSubjectId(subjId);
   }
 
-  // Execute Batch Assignment for current selected teacher
-  function handleExecuteAssignment() {
-    if (!selectedTeacher) return;
-    const targetSubject = (customSubjectInput.trim() || selectedSubjectName).trim();
-    if (!targetSubject) {
-      setActionSuccessNotice("يرجى اختيار أو كتابة اسم المادة.");
-      return;
-    }
-    if (selectedSectionIds.length === 0) {
-      setActionSuccessNotice("يرجى تحديد فصل واحد على الأقل لإسناده للمعلم.");
-      return;
-    }
+  function handleUpdateTeacherSpecialty(teacherId: string, subjectId: string) {
+    const updatedTeachers = school.teachers.map((t) => {
+      if (t.id !== teacherId) return t;
+      const cur = getTeacherSubjectIds(t);
+      const exists = cur.includes(subjectId);
+      const next = exists ? cur.filter((id) => id !== subjectId) : [...cur, subjectId];
+      return { ...t, subject_ids: next };
+    });
+    onUpdateSchool({ ...school, teachers: updatedTeachers }, "تم تحديث تخصص المعلم.");
+  }
 
-    // Ensure subject exists in school.subjects
-    let updatedSubjects = [...school.subjects];
-    let subjectObj = updatedSubjects.find((s) => normAr(s.name) === normAr(targetSubject));
-    if (!subjectObj) {
-      subjectObj = {
-        id: `SUB_${Date.now().toString(36)}_${updatedSubjects.length + 1}`,
-        name: targetSubject,
-        code: targetSubject.slice(0, 4),
-      };
-      updatedSubjects.push(subjectObj);
-    }
+  function handleUpdateTeacherQuota(teacherId: string, quota: number) {
+    const cleanQuota = Math.max(1, Math.min(36, quota || 24));
+    const updatedTeachers = school.teachers.map((t) =>
+      t.id === teacherId ? { ...t, max_weekly_periods: cleanQuota } : t
+    );
+    onUpdateSchool({ ...school, teachers: updatedTeachers });
+  }
 
-    // Create or update assignments for each selected section
+  function handleToggleSectionAssignment(sectionId: string) {
+    if (!selectedTeacher || !effectiveSubjectId) return;
     const updatedAssignments = [...school.assignments];
-    let addedCount = 0;
-    let modifiedCount = 0;
+    const existingIdx = updatedAssignments.findIndex(
+      (a) => a.section_id === sectionId && a.subject_id === effectiveSubjectId
+    );
 
-    for (const secId of selectedSectionIds) {
-      const existingIdx = updatedAssignments.findIndex(
-        (a) => a.teacher_id === selectedTeacher.id && a.section_id === secId && a.subject_id === subjectObj!.id
-      );
+    const secName = school.sections.find((s) => s.id === sectionId)?.name || sectionId;
+    const subName = school.subjects.find((s) => s.id === effectiveSubjectId)?.name || effectiveSubjectId;
 
-      if (existingIdx >= 0) {
-        updatedAssignments[existingIdx] = {
-          ...updatedAssignments[existingIdx],
-          weekly_periods: weeklyPeriods,
-        };
-        modifiedCount++;
+    if (existingIdx >= 0) {
+      const cur = updatedAssignments[existingIdx];
+      if (cur.teacher_id === selectedTeacher.id) {
+        updatedAssignments[existingIdx] = { ...cur, teacher_id: "" };
+        setActionSuccessNotice(`تم إلغاء إسناد فصل ${secName} (${subName}) من ${selectedTeacher.name}.`);
       } else {
-        updatedAssignments.push({
-          id: `ASG_${Date.now().toString(36)}_${updatedAssignments.length + 1}`,
-          teacher_id: selectedTeacher.id,
-          section_id: secId,
-          subject_id: subjectObj.id,
-          weekly_periods: weeklyPeriods,
-        });
-        addedCount++;
+        updatedAssignments[existingIdx] = { ...cur, teacher_id: selectedTeacher.id };
+        setActionSuccessNotice(`تم إسناد فصل ${secName} (${subName}) إلى ${selectedTeacher.name}.`);
       }
+    } else {
+      const defaultPeriods = getSubjectDefaultPeriodsForSection(sectionId, effectiveSubjectId);
+      updatedAssignments.push({
+        id: `ASG_${Date.now().toString(36)}_${updatedAssignments.length + 1}`,
+        section_id: sectionId,
+        subject_id: effectiveSubjectId,
+        teacher_id: selectedTeacher.id,
+        weekly_periods: defaultPeriods,
+      });
+      setActionSuccessNotice(`تم إسناد فصل ${secName} (${subName} - ${defaultPeriods} حصص) إلى ${selectedTeacher.name}.`);
     }
 
-    const updatedSchool: SchoolData = {
-      ...school,
-      subjects: updatedSubjects,
-      assignments: updatedAssignments,
-    };
-
-    const secNames = selectedSectionIds
-      .map((id) => school.sections.find((s) => s.id === id)?.name || id)
-      .join("، ");
-
-    const msg = `تم إسناد مادة "${targetSubject}" (${weeklyPeriods} حصص) للمعلم "${selectedTeacher.name}" في فصول: [${secNames}].`;
-    setActionSuccessNotice(msg);
-    onUpdateSchool(updatedSchool, msg);
-
-    // Reset selection after success
-    setSelectedSectionIds([]);
+    onUpdateSchool({ ...school, assignments: updatedAssignments });
   }
 
-  // Adjust periods for an existing assignment
   function handleAdjustAssignmentPeriods(assignmentId: string, delta: number) {
     if (!school) return;
     let removed = false;
@@ -258,121 +224,87 @@ export default function TeacherManagementHub({
       })
       .filter(Boolean) as TeachingAssignment[];
 
-    const updatedSchool: SchoolData = {
-      ...school,
-      assignments: updatedAssignments,
-    };
-
-    const msg = removed ? "تم حذف التكليف بنجاح." : "تم تعديل نصاب الحصص.";
-    onUpdateSchool(updatedSchool, msg);
+    onUpdateSchool(
+      { ...school, assignments: updatedAssignments },
+      removed ? "تم حذف التكليف." : "تم تحديث عدد الحصص."
+    );
   }
 
-  // Remove single assignment
   function handleRemoveAssignment(assignmentId: string) {
-    if (!school) return;
     const updatedAssignments = school.assignments.filter((a) => a.id !== assignmentId);
-    const updatedSchool: SchoolData = {
-      ...school,
-      assignments: updatedAssignments,
-    };
-    onUpdateSchool(updatedSchool, "تم حذف التكليف.");
+    onUpdateSchool({ ...school, assignments: updatedAssignments }, "تم حذف الإسناد.");
   }
 
-  // Toggle Day Off for the selected teacher
-  function handleToggleSelectedTeacherDay(day: number) {
-    if (!selectedTeacher) return;
-    const wp = selectedTeacher.work_pattern || { day_rules: {}, daily_period_rules: [], placement_rules: [] };
-    const current = wp.day_rules?.[String(day)] || "ALLOWED";
-    const next: "ALLOWED" | "MANDATORY_OFF" = current === "MANDATORY_OFF" ? "ALLOWED" : "MANDATORY_OFF";
-
+  function handleClearDayOffRule(teacherId: string, dayStr: string) {
     const updatedTeachers = school.teachers.map((t) => {
-      if (t.id !== selectedTeacher.id) return t;
+      if (t.id !== teacherId) return t;
+      const dayRules = { ...(t.work_pattern?.day_rules || {}) };
+      delete dayRules[dayStr];
       return {
         ...t,
         work_pattern: {
-          ...wp,
-          day_rules: { ...(wp.day_rules || {}), [String(day)]: next },
+          daily_period_rules: t.work_pattern?.daily_period_rules || [],
+          placement_rules: t.work_pattern?.placement_rules || [],
+          ...t.work_pattern,
+          day_rules: dayRules,
         },
       };
     });
-
-    const updatedSchool: SchoolData = {
-      ...school,
-      teachers: updatedTeachers,
-    };
-
-    onUpdateSchool(
-      updatedSchool,
-      `المعلم "${selectedTeacher.name}": يوم ${DAY_NAMES_AR[day]} ${next === "MANDATORY_OFF" ? "إجازة" : "متاح"}.`
-    );
+    onUpdateSchool({ ...school, teachers: updatedTeachers }, "تمت إزالة شرط الإجازة.");
   }
 
-  // Toggle Double Period Preference
-  function handleToggleDoublePeriod(pref: "FREE" | "DOUBLE_REQUIRED" | "SINGLE_ONLY") {
-    if (!selectedTeacher) return;
-    const wp = selectedTeacher.work_pattern || { day_rules: {}, daily_period_rules: [], placement_rules: [] };
-
-    const updatedTeachers = school.teachers.map((t) => {
-      if (t.id !== selectedTeacher.id) return t;
-      return {
-        ...t,
-        force_double_periods: pref === "DOUBLE_REQUIRED",
-        work_pattern: {
-          ...wp,
-          double_period_policy: pref,
-        },
-      };
-    });
-
+  function handleDeleteTeacher(teacherId: string) {
+    const tch = school.teachers.find((t) => t.id === teacherId);
+    if (!tch) return;
     const updatedSchool: SchoolData = {
       ...school,
-      teachers: updatedTeachers,
+      teachers: school.teachers.filter((t) => t.id !== teacherId),
+      assignments: school.assignments.filter((a) => a.teacher_id !== teacherId),
     };
-
-    onUpdateSchool(
-      updatedSchool,
-      `المعلم "${selectedTeacher.name}": سياسة الحصص المزدوجة (${pref === "DOUBLE_REQUIRED" ? "إجبارية" : pref === "SINGLE_ONLY" ? "ممنوعة" : "حرة"}).`
-    );
+    onUpdateSchool(updatedSchool, `تم حذف المعلم "${tch.name}".`);
   }
 
-  // Selected teacher stats
   const activeLoad = selectedTeacher ? teacherLoadMap.get(selectedTeacher.id) : null;
   const totalWeeklyQuota = activeLoad?.totalPeriods || 0;
   const maxNormalWeekly = selectedTeacher?.max_weekly_periods || 24;
-  const loadPercentage = Math.min(100, Math.round((totalWeeklyQuota / maxNormalWeekly) * 100));
+  const loadPercentage = Math.min(100, Math.round((totalWeeklyQuota / Math.max(1, maxNormalWeekly)) * 100));
+  const overQuota = totalWeeklyQuota > maxNormalWeekly;
+
+  const activeOffDays = selectedTeacher
+    ? Object.entries(selectedTeacher.work_pattern?.day_rules || {})
+        .filter(([, rule]) => rule === "MANDATORY_OFF")
+        .map(([dStr]) => dStr)
+    : [];
 
   return (
     <div className="space-y-4">
-      {/* Top Banner & Fast Actions */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+      {/* Top Action Bar */}
+      <div className="bg-white rounded-xl border border-[#E7E5E4] p-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-lg">👥</span>
-              <h2 className="text-base font-extrabold text-slate-900">
-                إدارة المعلمين والتكليفات الذكية
-              </h2>
-              <span className="bg-blue-100 text-blue-800 text-[11px] font-bold px-2 py-0.5 rounded-full">
-                {school.teachers.length} معلماً مسجلاً
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              بحث واكمال تلقائي ذكي، إسناد المواد والفصول والحصص بنقرة واحدة، وضبط أيام العمل والإجازات.
+            <h2 className="text-base font-extrabold text-[#1C1917]">
+              هيئة التدريس وإسناد الفصول
+            </h2>
+            <p className="text-xs text-[#57534E] mt-0.5">
+              أضف المعلم وحدد مادته ونصابه، ثم اختر الفصول بضغطة واحدة — وتُدار أي شروط إضافية عبر وكيل الشات الذكي
             </p>
           </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setShowAddTeacherBox((v) => !v)}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+              type="button"
+              onClick={() => {
+                if (!newTeacherSubjectId && school.subjects[0]) setNewTeacherSubjectId(school.subjects[0].id);
+                setShowAddTeacherBox(!showAddTeacherBox);
+              }}
+              className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] border border-[#E7E5E4] text-xs font-bold px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
             >
-              <span>➕</span>
-              <span>إضافة معلم جديد</span>
+              <span>+ إضافة معلم جديد</span>
             </button>
             {onSolveSchool && (
               <button
+                type="button"
                 onClick={onSolveSchool}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+                className="bg-[#0F766E] hover:bg-[#115E59] text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-xs"
               >
                 <span>⚡</span>
                 <span>تحديث وتوزيع الجدول</span>
@@ -381,10 +313,11 @@ export default function TeacherManagementHub({
           </div>
         </div>
 
-        {/* Inline Add Teacher Box */}
+        {/* Inline Add Teacher Box (Name + Specialty Subject + Quota) */}
         {showAddTeacherBox && (
-          <div className="mt-3 p-3 bg-blue-50/70 border border-blue-200 rounded-lg flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <div className="flex-1">
+          <div className="mt-3 p-3.5 bg-[#CCFBF1]/35 border border-[#14B8A6] rounded-xl grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+            <div className="sm:col-span-5">
+              <label className="text-[11px] font-bold text-[#1C1917] block mb-1">اسم المعلم:</label>
               <input
                 type="text"
                 value={newTeacherNameInput}
@@ -392,26 +325,57 @@ export default function TeacherManagementHub({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleAddNewTeacher();
                 }}
-                placeholder="اكتب اسم المعلم (مثال: أستاذ محمود السيد، مس إيمان)..."
-                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                placeholder="مثال: أ. أحمد محمود"
+                className="w-full bg-white border border-[#D6D3D1] rounded-lg px-3 py-2 text-xs font-bold text-[#1C1917] placeholder:text-[#57534E] focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]"
                 autoFocus
               />
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleAddNewTeacher}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-1.5 rounded-lg transition cursor-pointer"
+
+            <div className="sm:col-span-3">
+              <label className="text-[11px] font-bold text-[#1C1917] block mb-1">المادة / التخصص:</label>
+              <select
+                value={newTeacherSubjectId}
+                onChange={(e) => setNewTeacherSubjectId(e.target.value)}
+                className="w-full bg-white border border-[#D6D3D1] rounded-lg px-2.5 py-2 text-xs font-bold text-[#1C1917] focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]"
               >
-                تأكيد الإضافة
+                {school.subjects.map((sub) => (
+                  <option key={sub.id} value={sub.id}>
+                    {sub.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-[11px] font-bold text-[#1C1917] block mb-1">النصاب:</label>
+              <input
+                type="number"
+                min={1}
+                max={36}
+                value={newTeacherQuota}
+                onChange={(e) => setNewTeacherQuota(Math.max(1, Number(e.target.value) || 24))}
+                className="w-full bg-white border border-[#D6D3D1] rounded-lg px-2.5 py-2 text-xs font-bold text-center text-[#1C1917] tabular-nums"
+              />
+            </div>
+
+            <div className="sm:col-span-2 flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleAddNewTeacher}
+                className="flex-1 bg-[#0F766E] hover:bg-[#115E59] text-white text-xs font-bold px-3 py-2 rounded-lg transition cursor-pointer"
+              >
+                إضافة
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setShowAddTeacherBox(false);
                   setNewTeacherNameInput("");
                 }}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
+                className="bg-white hover:bg-[#FAFAF9] border border-[#E7E5E4] text-[#57534E] text-xs font-bold px-2.5 py-2 rounded-lg transition cursor-pointer"
+                aria-label="إلغاء"
               >
-                إلغاء
+                ✕
               </button>
             </div>
           </div>
@@ -419,11 +383,13 @@ export default function TeacherManagementHub({
 
         {/* Action feedback notice */}
         {actionSuccessNotice && (
-          <div className="mt-2.5 p-2 bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs rounded-lg font-bold flex items-center justify-between">
-            <span>✅ {actionSuccessNotice}</span>
+          <div className="mt-3 p-2.5 bg-[#CCFBF1]/50 border border-[#14B8A6] text-[#0F766E] text-xs rounded-xl font-bold flex items-center justify-between">
+            <span>✓ {actionSuccessNotice}</span>
             <button
+              type="button"
               onClick={() => setActionSuccessNotice(null)}
-              className="text-emerald-700 hover:text-emerald-900 text-xs font-bold cursor-pointer"
+              aria-label="إغلاق الإشعار"
+              className="text-[#0F766E] hover:text-[#115E59] text-xs font-bold px-2 py-1 rounded cursor-pointer"
             >
               ✕
             </button>
@@ -431,27 +397,29 @@ export default function TeacherManagementHub({
         )}
       </div>
 
-      {/* Main Grid: Left Column (Teachers Search & Selector) | Right Column (Selected Teacher Studio) */}
+      {/* Main Grid: Start Column (Teachers Search & Selector) | End Column (Assignment Studio) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left Column: Teachers Directory & Search (4 cols) */}
-        <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        {/* Teachers Directory (4 cols) */}
+        <div className="lg:col-span-4 bg-white rounded-xl border border-[#E7E5E4] p-4 space-y-3">
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-              <span>🔍 البحث السريع عن المعلم</span>
-              <span className="text-[11px] text-slate-400">({filteredTeachers.length})</span>
+            <label className="text-xs font-bold text-[#1C1917] flex items-center justify-between">
+              <span>قائمة المعلمين</span>
+              <span className="text-xs text-[#57534E] tabular-nums">({filteredTeachers.length})</span>
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="اكتب اسم أو كود المعلم..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                placeholder="ابحث بالاسم أو المادة..."
+                className="w-full bg-[#FAFAF9] border border-[#D6D3D1] rounded-lg px-3 py-2 pe-8 text-xs text-[#1C1917] placeholder:text-[#57534E] focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]"
               />
               {searchQuery && (
                 <button
+                  type="button"
                   onClick={() => setSearchQuery("")}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                  aria-label="مسح البحث"
+                  className="absolute end-2.5 top-1/2 -translate-y-1/2 text-[#57534E] hover:text-[#1C1917] text-xs cursor-pointer p-1"
                 >
                   ✕
                 </button>
@@ -459,30 +427,16 @@ export default function TeacherManagementHub({
             </div>
           </div>
 
-          {/* Teacher quick create prompt if search has no results */}
-          {filteredTeachers.length === 0 && searchQuery.trim().length > 1 && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-center space-y-2">
-              <p className="text-xs text-amber-800">
-                لم يتم العثور على معلم باسم &quot;{searchQuery}&quot;
-              </p>
-              <button
-                onClick={() => {
-                  setNewTeacherNameInput(searchQuery);
-                  handleAddNewTeacher();
-                }}
-                className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
-              >
-                ➕ إضافة &quot;{searchQuery}&quot; كمعلم جديد
-              </button>
-            </div>
-          )}
-
-          {/* Teachers Scroll List */}
-          <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-0.5">
+          <div className="space-y-1.5 max-h-[520px] overflow-y-auto pe-0.5">
             {filteredTeachers.map((t) => {
               const load = teacherLoadMap.get(t.id);
               const periods = load?.totalPeriods || 0;
+              const maxQ = t.max_weekly_periods || 24;
               const isSelected = selectedTeacher?.id === t.id;
+              const tSubjNames = getTeacherSubjectIds(t)
+                .map((sid) => school.subjects.find((sub) => sub.id === sid)?.name)
+                .filter(Boolean)
+                .join("، ");
               const offDaysCount = Object.values(t.work_pattern?.day_rules || {}).filter(
                 (r) => r === "MANDATORY_OFF"
               ).length;
@@ -491,41 +445,37 @@ export default function TeacherManagementHub({
                 <div
                   key={t.id}
                   onClick={() => handleSelectTeacher(t.id)}
-                  className={`p-2.5 rounded-lg border transition cursor-pointer flex items-center justify-between text-xs ${
+                  className={`p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 text-xs ${
                     isSelected
-                      ? "bg-blue-50/80 border-blue-500 shadow-2xs font-bold"
-                      : "bg-slate-50/60 border-slate-200 hover:bg-slate-100/80 hover:border-slate-300"
+                      ? "bg-[#CCFBF1]/55 border-[#14B8A6] shadow-2xs font-bold"
+                      : "bg-[#FAFAF9] border-[#E7E5E4] hover:bg-white hover:border-[#D6D3D1]"
                   }`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-slate-900 truncate">{t.name}</span>
+                      <span className="font-bold text-[#1C1917] truncate">{t.name}</span>
                       {offDaysCount > 0 && (
-                        <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.2 rounded-full font-bold whitespace-nowrap">
-                          {offDaysCount} أوف
+                        <span className="text-[10px] bg-[#EDE9FE] text-[#6D28D9] px-1.5 py-0.2 rounded-full font-bold whitespace-nowrap">
+                          {offDaysCount} شرط
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
-                      <span>كود: {t.code || t.name.split(" ")[0]}</span>
-                      <span>•</span>
-                      <span>{load?.sections.length || 0} فصول</span>
+                    <div className="text-[11px] text-[#57534E] mt-0.5 truncate">
+                      {tSubjNames || "غير محدد التخصص"} • {load?.sections.length || 0} فصول
                     </div>
                   </div>
 
-                  <div className="text-left shrink-0 pl-1">
+                  <div className="text-end shrink-0 ps-1">
                     <span
-                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                        periods >= 24
-                          ? "bg-rose-100 text-rose-800"
-                          : periods > 18
-                          ? "bg-amber-100 text-amber-800"
+                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
+                        periods > maxQ
+                          ? "bg-[#FFF1F2] text-[#BE123C] border border-[#FB7185]"
                           : periods > 0
-                          ? "bg-blue-100 text-blue-800"
-                          : "bg-slate-200 text-slate-600"
+                          ? "bg-[#CCFBF1] text-[#0F766E]"
+                          : "bg-[#E7E5E4] text-[#57534E]"
                       }`}
                     >
-                      {periods} حصة
+                      {periods} / {maxQ}
                     </span>
                   </div>
                 </div>
@@ -534,377 +484,283 @@ export default function TeacherManagementHub({
           </div>
         </div>
 
-        {/* Right Column: Selected Teacher Hub & Quick Assignment Studio (8 cols) */}
+        {/* Selected Teacher Assignment Studio (8 cols) */}
         <div className="lg:col-span-8 space-y-4">
           {selectedTeacher ? (
             <>
-              {/* Teacher Header & Workload Bar */}
-              <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              {/* Teacher Profile + Specialty + Quota + Active Chat Constraints */}
+              <div className="bg-white rounded-xl border border-[#E7E5E4] p-4 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E7E5E4] pb-3">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-base font-extrabold text-slate-900">
-                        الأستاذ/ة: {selectedTeacher.name}
-                      </h3>
-                      <span className="bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded-md font-mono">
-                        {selectedTeacher.code || selectedTeacher.name.split(" ")[0]}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      مسند إليه حالياً {totalWeeklyQuota} حصة عبر {activeLoad?.sections.length || 0} فصول مختلفة.
+                    <h3 className="text-base font-extrabold text-[#1C1917]">
+                      {selectedTeacher.name}
+                    </h3>
+                    <p className="text-xs text-[#57534E] mt-0.5 tabular-nums">
+                      المُسند: <strong className="text-[#1C1917]">{totalWeeklyQuota}</strong> حصة عبر{" "}
+                      <strong className="text-[#1C1917]">{activeLoad?.sections.length || 0}</strong> فصول —{" "}
+                      {maxNormalWeekly - totalWeeklyQuota >= 0
+                        ? `المتبقي من النصاب: ${maxNormalWeekly - totalWeeklyQuota} حصة`
+                        : `تجاوز النصاب بـ ${totalWeeklyQuota - maxNormalWeekly} حصة!`}
                     </p>
                   </div>
 
-                  {/* Workload Pill */}
-                  <div className="flex items-center gap-2">
-                    <div className="text-left">
-                      <div className="text-xs font-bold text-slate-700">النصاب الأسبوعي</div>
-                      <div className="text-xs text-slate-500">
-                        {totalWeeklyQuota} من {maxNormalWeekly} حصة ({loadPercentage}%)
-                      </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-xs font-bold text-[#57534E]">النصاب:</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={36}
+                        value={maxNormalWeekly}
+                        onChange={(e) => handleUpdateTeacherQuota(selectedTeacher.id, Number(e.target.value))}
+                        className="w-16 bg-white border border-[#D6D3D1] rounded-lg px-2 py-1 text-xs font-extrabold text-center text-[#1C1917] tabular-nums"
+                      />
                     </div>
-                    <div className="w-16 h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                    <div className="w-20 h-2 bg-[#FAFAF9] rounded-full overflow-hidden border border-[#E7E5E4]">
                       <div
-                        className={`h-full transition-all duration-300 ${
-                          loadPercentage > 100
-                            ? "bg-rose-500"
-                            : loadPercentage >= 80
-                            ? "bg-emerald-500"
-                            : "bg-blue-500"
-                        }`}
+                        className={`h-full transition-all duration-300 ${overQuota ? "bg-[#BE123C]" : "bg-[#0F766E]"}`}
                         style={{ width: `${Math.min(100, loadPercentage)}%` }}
                       />
                     </div>
-                  </div>
-                </div>
-
-                {/* Days of Week & Availability Controls for this Teacher */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-700">أيام الحضور والإجازات للمعلم:</span>
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <span className="text-slate-500">الحصص المزدوجة:</span>
-                      <button
-                        onClick={() => handleToggleDoublePeriod("DOUBLE_REQUIRED")}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
-                          selectedTeacher.work_pattern?.double_period_policy === "DOUBLE_REQUIRED"
-                            ? "bg-blue-600 text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        إجبارية
-                      </button>
-                      <button
-                        onClick={() => handleToggleDoublePeriod("FREE")}
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
-                          !selectedTeacher.work_pattern?.double_period_policy ||
-                          selectedTeacher.work_pattern?.double_period_policy === "FREE"
-                            ? "bg-blue-600 text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        حرة
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                    {school.days.map((d) => {
-                      const isOff = selectedTeacher.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
-                      return (
-                        <button
-                          key={d}
-                          onClick={() => handleToggleSelectedTeacherDay(d)}
-                          className={`p-2 rounded-lg border text-xs font-bold transition flex flex-col items-center justify-center gap-1 cursor-pointer ${
-                            isOff
-                              ? "bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100"
-                              : "bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
-                          }`}
-                        >
-                          <span>{DAY_NAMES_AR[d]}</span>
-                          <span className="text-[10px] font-medium">
-                            {isOff ? "إجازة ✗" : "متاح ✓"}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Smart Quick Assignment Studio ("استوديو الإسناد السريع") */}
-              <div className="bg-white rounded-xl border border-blue-200 shadow-xs p-4 space-y-4">
-                <div className="flex items-center gap-2 border-b border-blue-100 pb-2.5">
-                  <span className="text-base">⚡</span>
-                  <h4 className="text-sm font-extrabold text-blue-950">
-                    استوديو الإسناد السريع للمعلم: {selectedTeacher.name}
-                  </h4>
-                </div>
-
-                {/* Step 1: Subject Selection with Egyptian Standard Autocomplete Chips */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                    <span>1. اختر أو اكتب المادة الدراسية:</span>
-                    <span className="text-[11px] text-blue-600 font-normal">
-                      المختارة حالياً: <b className="font-bold">{customSubjectInput || selectedSubjectName}</b>
-                    </span>
-                  </label>
-
-                  {/* Standard Egyptian Quick Subject Chips */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {COMMON_EGYPTIAN_SUBJECTS.map((sub) => {
-                      const isSelected =
-                        !customSubjectInput && normAr(selectedSubjectName) === normAr(sub.name);
-                      return (
-                        <button
-                          key={sub.name}
-                          type="button"
-                          onClick={() => {
-                            setCustomSubjectInput("");
-                            handleChooseSubject(sub.name);
-                          }}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
-                            isSelected
-                              ? "bg-blue-600 text-white border-blue-600 shadow-2xs"
-                              : `${sub.color} hover:opacity-80`
-                          }`}
-                        >
-                          {sub.name} ({sub.defaultPeriods}ح)
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Custom Subject Autocomplete Input */}
-                  <div className="flex items-center gap-2 pt-1">
-                    <input
-                      type="text"
-                      value={customSubjectInput}
-                      onChange={(e) => {
-                        setCustomSubjectInput(e.target.value);
-                        if (e.target.value) handleChooseSubject(e.target.value);
-                      }}
-                      list="school-subjects-list"
-                      placeholder="أو اكتب اسم مادة مخصصة (مثال: لغة فرنسية، دراسات، نشاط)..."
-                      className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                    />
-                    <datalist id="school-subjects-list">
-                      {allSubjectSuggestions.map((name) => (
-                        <option key={name} value={name} />
-                      ))}
-                    </datalist>
-                  </div>
-                </div>
-
-                {/* Step 2: Target Sections Selection (Multi-select Pills) */}
-                <div className="space-y-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <label className="text-xs font-bold text-slate-800">
-                      2. حدد الفصول المستهدفة ({selectedSectionIds.length} فصول محددة):
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={selectAllSections}
-                        className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold cursor-pointer"
-                      >
-                        الكل
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => selectGradeSections("1")}
-                        className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold cursor-pointer"
-                      >
-                        أولى
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => selectGradeSections("2")}
-                        className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold cursor-pointer"
-                      >
-                        ثانية
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => selectGradeSections("3")}
-                        className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold cursor-pointer"
-                      >
-                        ثالثة
-                      </button>
-                      {selectedSectionIds.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={clearSectionSelection}
-                          className="text-[11px] text-rose-600 hover:text-rose-800 px-1 font-bold cursor-pointer"
-                        >
-                          مسح
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 sm:grid-cols-6 md:grid-cols-8 gap-1.5 max-h-40 overflow-y-auto p-1 bg-slate-50 rounded-lg border border-slate-200">
-                    {school.sections.map((sec) => {
-                      const isSelected = selectedSectionIds.includes(sec.id);
-                      // Check if already assigned this subject to this section
-                      const alreadyAssigned = activeLoad?.assignments.some((a) => a.section_id === sec.id);
-
-                      return (
-                        <button
-                          key={sec.id}
-                          type="button"
-                          onClick={() => toggleSection(sec.id)}
-                          className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition flex flex-col items-center justify-center cursor-pointer ${
-                            isSelected
-                              ? "bg-blue-600 text-white border-blue-600 shadow-2xs"
-                              : alreadyAssigned
-                              ? "bg-blue-50/70 border-blue-200 text-blue-800 hover:bg-blue-100"
-                              : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
-                          }`}
-                        >
-                          <span>{sec.name}</span>
-                          {alreadyAssigned && !isSelected && (
-                            <span className="text-[9px] text-blue-600">مسند سابقاً</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Step 3: Weekly Periods Count & Multiplier Summary */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center bg-blue-50/50 p-3 rounded-lg border border-blue-100">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-800">
-                      3. عدد الحصص الأسبوعية لكل فصل:
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setWeeklyPeriods((v) => Math.max(1, v - 1))}
-                        className="w-7 h-7 bg-white border border-slate-300 hover:bg-slate-100 rounded-md text-xs font-bold flex items-center justify-center cursor-pointer"
-                      >
-                        −
-                      </button>
-                      <input
-                        type="number"
-                        min="1"
-                        max="12"
-                        value={weeklyPeriods}
-                        onChange={(e) => setWeeklyPeriods(Math.max(1, Number(e.target.value) || 1))}
-                        className="w-14 bg-white border border-slate-300 rounded-md text-center py-1 text-xs font-extrabold text-blue-900"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setWeeklyPeriods((v) => v + 1)}
-                        className="w-7 h-7 bg-white border border-slate-300 hover:bg-slate-100 rounded-md text-xs font-bold flex items-center justify-center cursor-pointer"
-                      >
-                        +
-                      </button>
-
-                      {/* Quick period buttons */}
-                      <div className="flex items-center gap-1 mr-2">
-                        {[2, 3, 4, 5, 6].map((p) => (
-                          <button
-                            key={p}
-                            type="button"
-                            onClick={() => setWeeklyPeriods(p)}
-                            className={`w-6 h-6 rounded text-[11px] font-bold cursor-pointer ${
-                              weeklyPeriods === p
-                                ? "bg-blue-600 text-white"
-                                : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Summary & Execute Button */}
-                  <div className="text-left space-y-1.5">
-                    <div className="text-xs text-slate-600">
-                      الإجمالي المضاف:{" "}
-                      <span className="font-extrabold text-blue-700">
-                        {selectedSectionIds.length} فصول × {weeklyPeriods} حصص ={" "}
-                        {selectedSectionIds.length * weeklyPeriods} حصة
-                      </span>
-                    </div>
-
                     <button
                       type="button"
-                      onClick={handleExecuteAssignment}
-                      disabled={selectedSectionIds.length === 0}
-                      className={`w-full py-2 px-4 rounded-lg text-xs font-extrabold transition flex items-center justify-center gap-1.5 shadow-2xs ${
-                        selectedSectionIds.length > 0
-                          ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-                          : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                      }`}
+                      onClick={() => handleDeleteTeacher(selectedTeacher.id)}
+                      className="text-xs font-bold text-[#BE123C] hover:bg-[#FFF1F2] px-2.5 py-1.5 rounded-lg border border-transparent hover:border-[#FB7185] transition cursor-pointer"
+                      title="حذف المعلم"
                     >
-                      <span>🚀</span>
-                      <span>إسناد الحصص للمعلم ({selectedTeacher.name})</span>
+                      حذف
                     </button>
                   </div>
                 </div>
+
+                {/* Specialty Subject Selection */}
+                <div className="space-y-1.5">
+                  <span className="text-xs font-bold text-[#1C1917] block">التخصص / المواد التي يدرّسها:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {school.subjects.map((sub) => {
+                      const hasSub = selectedTeacherSubjIds.includes(sub.id);
+                      return (
+                        <button
+                          key={sub.id}
+                          type="button"
+                          onClick={() => handleUpdateTeacherSpecialty(selectedTeacher.id, sub.id)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                            hasSub
+                              ? "bg-[#CCFBF1] text-[#0F766E] border-[#14B8A6]"
+                              : "bg-[#FAFAF9] text-[#57534E] border-[#E7E5E4] hover:border-[#D6D3D1]"
+                          }`}
+                        >
+                          {hasSub ? `✓ ${sub.name}` : `+ ${sub.name}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Active Constraints from AI Chat + Tip */}
+                <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
+                  {activeOffDays.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs font-bold text-[#6D28D9]">الشروط المطبقة من الوكيل:</span>
+                      {activeOffDays.map((dStr) => (
+                        <span
+                          key={dStr}
+                          className="inline-flex items-center gap-1.5 bg-[#EDE9FE] text-[#6D28D9] text-xs font-bold px-2.5 py-1 rounded-lg"
+                        >
+                          <span>إجازة: {DAY_NAMES_AR[Number(dStr)]}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleClearDayOffRule(selectedTeacher.id, dStr)}
+                            className="hover:text-[#BE123C] font-black cursor-pointer"
+                            aria-label={`إلغاء إجازة ${DAY_NAMES_AR[Number(dStr)]}`}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="w-full p-2.5 rounded-xl bg-[#EDE9FE]/55 border border-[#8B5CF6]/35 text-xs text-[#6D28D9] flex items-center gap-2">
+                      <span aria-hidden="true">✦</span>
+                      <span>
+                        لإضافة إجازات أو شروط حصص أولى وأخيرة لهذا المعلم، اطلب ذلك مباشرة من <strong>وكيل الجداول الذكي</strong> في الشات.
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Active Assignments List for this Teacher */}
-              <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-base">📋</span>
-                    <h4 className="text-xs font-extrabold text-slate-900">
-                      التكليفات الحالية المسندة للأستاذ/ة {selectedTeacher.name} (
-                      {activeLoad?.assignments.length || 0} تكليف)
+              {/* 1-Click Section Picker with Auto-Filled Periods */}
+              <div className="bg-white rounded-xl border border-[#E7E5E4] p-4 shadow-xs space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E7E5E4] pb-2.5">
+                  <div>
+                    <h4 className="text-sm font-extrabold text-[#1C1917]">
+                      تعيين الفصول والحصص
                     </h4>
+                    <p className="text-xs text-[#57534E]">
+                      اضغط على الفصل لإسناده أو إلغائه — تُملأ عدد الحصص تلقائياً ويمكنك تعديلها
+                    </p>
                   </div>
-                  <span className="text-xs font-bold text-slate-600">
-                    مجموع الحصص: {totalWeeklyQuota} حصة
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSubjects(!showAllSubjects)}
+                    className="text-xs font-bold text-[#0F766E] hover:underline cursor-pointer"
+                  >
+                    {showAllSubjects ? "عرض تخصص المعلم فقط" : "اختيار أي مادة أخرى"}
+                  </button>
+                </div>
+
+                {/* Subject Pills */}
+                <div className="flex flex-wrap gap-1.5">
+                  {(showAllSubjects || selectedTeacherSubjIds.length === 0
+                    ? school.subjects
+                    : school.subjects.filter((sub) => selectedTeacherSubjIds.includes(sub.id))
+                  ).map((sub) => (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => setActiveSubjectId(sub.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                        effectiveSubjectId === sub.id
+                          ? "bg-[#0F766E] text-white border-[#0F766E]"
+                          : "bg-[#FAFAF9] text-[#1C1917] border-[#E7E5E4] hover:border-[#14B8A6]"
+                      }`}
+                    >
+                      {sub.name}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Sections Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[260px] overflow-y-auto p-1">
+                  {school.sections.map((sec) => {
+                    const asgn = school.assignments.find(
+                      (a) => a.section_id === sec.id && a.subject_id === effectiveSubjectId
+                    );
+                    const isAssignedToThis = asgn?.teacher_id === selectedTeacher.id;
+                    const assignedOther =
+                      asgn?.teacher_id && asgn.teacher_id !== selectedTeacher.id
+                        ? school.teachers.find((t) => t.id === asgn.teacher_id)
+                        : null;
+                    const pCount = asgn?.weekly_periods || getSubjectDefaultPeriodsForSection(sec.id, effectiveSubjectId);
+
+                    return (
+                      <div
+                        key={sec.id}
+                        className={`p-2.5 rounded-xl border transition flex flex-col justify-between gap-2 ${
+                          isAssignedToThis
+                            ? "bg-[#CCFBF1]/55 border-[#14B8A6] shadow-2xs"
+                            : assignedOther
+                            ? "bg-[#FAFAF9] border-[#E7E5E4] opacity-85"
+                            : "bg-white border-[#E7E5E4] hover:border-[#14B8A6]"
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSectionAssignment(sec.id)}
+                          className="w-full text-start cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-extrabold text-xs text-[#1C1917]">{sec.name}</span>
+                            <span className={`text-xs font-black ${isAssignedToThis ? "text-[#0F766E]" : "text-[#57534E]"}`}>
+                              {isAssignedToThis ? "✓" : "+"}
+                            </span>
+                          </div>
+                          {assignedOther && (
+                            <div className="text-[10px] text-[#57534E] truncate mt-0.5">
+                              مع: {assignedOther.name}
+                            </div>
+                          )}
+                        </button>
+
+                        {isAssignedToThis && asgn && (
+                          <div className="flex items-center justify-between pt-1 border-t border-[#14B8A6]/40">
+                            <span className="text-[11px] font-bold text-[#0F766E]">الحصص:</span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustAssignmentPeriods(asgn.id, -1)}
+                                className="w-7 h-7 bg-white border border-[#14B8A6] rounded text-xs font-black text-[#0F766E] cursor-pointer"
+                                aria-label="تقليل حصة"
+                              >
+                                −
+                              </button>
+                              <span className="w-6 text-center text-xs font-black text-[#1C1917] tabular-nums">
+                                {pCount}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustAssignmentPeriods(asgn.id, 1)}
+                                className="w-7 h-7 bg-white border border-[#14B8A6] rounded text-xs font-black text-[#0F766E] cursor-pointer"
+                                aria-label="زيادة حصة"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Active Assignments Table */}
+              <div className="bg-white rounded-xl border border-[#E7E5E4] p-4 shadow-xs space-y-3">
+                <div className="flex items-center justify-between border-b border-[#E7E5E4] pb-2">
+                  <h4 className="text-xs font-extrabold text-[#1C1917]">
+                    التكليفات المسندة لـ {selectedTeacher.name} ({activeLoad?.assignments.length || 0})
+                  </h4>
+                  <span className="text-xs font-bold text-[#57534E] tabular-nums">
+                    المجموع: {totalWeeklyQuota} حصة
                   </span>
                 </div>
 
                 {activeLoad && activeLoad.assignments.length > 0 ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-right border-collapse">
+                    <table className="w-full text-xs text-start border-collapse">
                       <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
-                          <th className="p-2.5">المادة</th>
-                          <th className="p-2.5">الفصل</th>
+                        <tr className="bg-[#FAFAF9] border-b border-[#E7E5E4] text-[#57534E] font-bold">
+                          <th className="p-2.5 text-start">المادة</th>
+                          <th className="p-2.5 text-start">الفصل</th>
                           <th className="p-2.5 text-center">الحصص الأسبوعية</th>
-                          <th className="p-2.5 text-center">إجراءات</th>
+                          <th className="p-2.5 text-center">حذف</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-[#E7E5E4]">
                         {activeLoad.assignments.map((asg) => {
                           const sub = school.subjects.find((s) => s.id === asg.subject_id);
                           const sec = school.sections.find((s) => s.id === asg.section_id);
 
                           return (
-                            <tr key={asg.id} className="hover:bg-slate-50/80 transition">
-                              <td className="p-2.5 font-bold text-slate-900">
+                            <tr key={asg.id} className="hover:bg-[#FAFAF9] transition">
+                              <td className="p-2.5 font-bold text-[#1C1917]">
                                 {sub?.name || asg.subject_id}
                               </td>
                               <td className="p-2.5">
-                                <span className="bg-slate-100 text-slate-800 font-bold px-2 py-0.5 rounded text-xs">
+                                <span className="bg-[#FAFAF9] border border-[#E7E5E4] text-[#1C1917] font-bold px-2 py-0.5 rounded text-xs">
                                   {sec?.name || asg.section_id}
                                 </span>
                               </td>
                               <td className="p-2.5 text-center">
                                 <div className="inline-flex items-center gap-1.5">
                                   <button
+                                    type="button"
                                     onClick={() => handleAdjustAssignmentPeriods(asg.id, -1)}
-                                    className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-bold flex items-center justify-center cursor-pointer"
+                                    className="w-8 h-8 bg-[#FAFAF9] hover:bg-[#E7E5E4] border border-[#E7E5E4] rounded text-[#1C1917] font-bold flex items-center justify-center cursor-pointer"
+                                    aria-label="تقليل حصة"
                                     title="تقليل حصة"
                                   >
                                     −
                                   </button>
-                                  <span className="font-extrabold text-slate-900 w-6 text-center">
+                                  <span className="font-extrabold text-[#1C1917] w-6 text-center tabular-nums">
                                     {asg.weekly_periods}
                                   </span>
                                   <button
+                                    type="button"
                                     onClick={() => handleAdjustAssignmentPeriods(asg.id, 1)}
-                                    className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-bold flex items-center justify-center cursor-pointer"
+                                    className="w-8 h-8 bg-[#FAFAF9] hover:bg-[#E7E5E4] border border-[#E7E5E4] rounded text-[#1C1917] font-bold flex items-center justify-center cursor-pointer"
+                                    aria-label="زيادة حصة"
                                     title="زيادة حصة"
                                   >
                                     +
@@ -913,11 +769,12 @@ export default function TeacherManagementHub({
                               </td>
                               <td className="p-2.5 text-center">
                                 <button
+                                  type="button"
                                   onClick={() => handleRemoveAssignment(asg.id)}
-                                  className="text-rose-600 hover:text-rose-800 font-bold text-xs p-1 hover:bg-rose-50 rounded transition cursor-pointer"
+                                  className="text-[#BE123C] hover:bg-[#FFF1F2] font-bold text-xs px-2.5 py-1.5 rounded-lg transition cursor-pointer"
                                   title="حذف هذا التكليف"
                                 >
-                                  🗑️ حذف
+                                  حذف
                                 </button>
                               </td>
                             </tr>
@@ -927,16 +784,15 @@ export default function TeacherManagementHub({
                     </table>
                   </div>
                 ) : (
-                  <div className="py-6 text-center text-xs text-slate-400 bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
-                    لا توجد أي تكليفات مسندة لهذا المعلم بعد. استخدم &quot;استوديو الإسناد السريع&quot; أعلاه
-                    لإسناد المواد والفصول.
+                  <div className="py-6 text-center text-xs text-[#57534E] bg-[#FAFAF9] rounded-xl border border-dashed border-[#E7E5E4]">
+                    لا توجد فصول مسندة حالياً لهذا المعلم. اختر الفصول من الأعلى لإسنادها.
                   </div>
                 )}
               </div>
             </>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500">
-              اختر معلماً من القائمة الجانبية أو اضغط على &quot;إضافة معلم جديد&quot; للبدء.
+            <div className="bg-white rounded-xl border border-[#E7E5E4] p-8 text-center text-xs text-[#57534E]">
+              اختر معلماً من القائمة لإسناد الفصول والحصص له.
             </div>
           )}
         </div>

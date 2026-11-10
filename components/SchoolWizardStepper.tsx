@@ -1,6 +1,18 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import type { SchoolData, Grade, Section, Subject, Teacher, TeachingAssignment } from "../types.js";
-import { ALL_SCHOOL_PRESETS, getPresetById, createSchoolFromPreset, type SchoolPreset } from "../presets/commonPresets.js";
+import { DAY_NAMES_AR, type SchoolData, type Grade, type Section, type Subject, type Teacher, type TeachingAssignment } from "../types.js";
+import {
+  ALL_SCHOOL_PRESETS,
+  createSchoolFromPreset,
+  getSubjectsForStageAndType,
+  buildDefaultGradesForStage,
+  STAGE_LABELS_AR,
+  subjectsMatchEquivalent,
+  syncSchoolPeriodsPerDay,
+  EDU_TYPE_LABELS_AR,
+  type CatalogStage,
+  type CatalogEduType,
+  type CatalogSubjectItem,
+} from "../presets/commonPresets.js";
 import { generateSchoolMarkdown, validateSchoolCapacity } from "../services/schoolCore.js";
 import { InBrowserSchoolEngine } from "../services/localEngine.js";
 
@@ -53,12 +65,57 @@ export default function SchoolWizardStepper({
     new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
   );
 
-  // Preset category filter for Step 1
-  const [presetCategoryFilter, setPresetCategoryFilter] = useState<"ALL" | "GOVERNMENT_GENERAL" | "EXPERIMENTAL_LANGUAGE">("ALL");
+  // Stage & Education Type Subject Catalog browser state (Step 1)
+  const [selectedStage, setSelectedStage] = useState<CatalogStage>(() => {
+    const metaStage = school.metadata?.stage;
+    if (metaStage === "PRIMARY" || metaStage === "PREPARATORY" || metaStage === "SECONDARY") return metaStage;
+    return school.grades.length >= 6 ? "PRIMARY" : "PREPARATORY";
+  });
+  const [selectedEduType, setSelectedEduType] = useState<CatalogEduType>(() => {
+    if (school.metadata?.school_type === "EXPERIMENTAL_LANGUAGE") return "LANGUAGE";
+    return "GENERAL";
+  });
+  const [selectedCatalogIds, setSelectedCatalogIds] = useState<string[]>([]);
+  const [quickCustomSubjectName, setQuickCustomSubjectName] = useState<string>("");
 
   // Multi-line paste input for Step 4 (Teachers)
   const [bulkTeachersText, setBulkTeachersText] = useState("");
+  const [bulkSubjectId, setBulkSubjectId] = useState<string>("");
   const [showBulkTeacherModal, setShowBulkTeacherModal] = useState(false);
+  const [expandedExtraTeacherId, setExpandedExtraTeacherId] = useState<string | null>(null);
+
+  // Step 5 (Teacher-Centric Assignment Studio)
+  const [selectedAssignTeacherId, setSelectedAssignTeacherId] = useState<string>("");
+  const [selectedAssignSubjectId, setSelectedAssignSubjectId] = useState<string>("");
+  const [showAllSubjectsForTeacher, setShowAllSubjectsForTeacher] = useState<boolean>(false);
+
+  // Infer teacher specialty subjects from explicit subject_ids or existing assignments
+  const getTeacherSubjectIds = useCallback((t: Teacher): string[] => {
+    if (t.subject_ids && t.subject_ids.length > 0) return t.subject_ids;
+    const inferred = new Set<string>();
+    for (const a of school.assignments) {
+      if (a.teacher_id === t.id && a.subject_id) inferred.add(a.subject_id);
+    }
+    return Array.from(inferred);
+  }, [school.assignments]);
+
+  const activeAssignTeacher = useMemo(() => {
+    return school.teachers.find((t) => t.id === selectedAssignTeacherId) || school.teachers[0] || null;
+  }, [school.teachers, selectedAssignTeacherId]);
+
+  const activeTeacherSubjIds = useMemo(() => {
+    if (!activeAssignTeacher) return [];
+    return getTeacherSubjectIds(activeAssignTeacher);
+  }, [activeAssignTeacher, getTeacherSubjectIds]);
+
+  const effectiveAssignSubjectId = useMemo(() => {
+    if (selectedAssignSubjectId && school.subjects.some((sub) => sub.id === selectedAssignSubjectId)) {
+      if (showAllSubjectsForTeacher || activeTeacherSubjIds.length === 0 || activeTeacherSubjIds.includes(selectedAssignSubjectId)) {
+        return selectedAssignSubjectId;
+      }
+    }
+    return activeTeacherSubjIds[0] || school.subjects[0]?.id || "";
+  }, [selectedAssignSubjectId, school.subjects, showAllSubjectsForTeacher, activeTeacherSubjIds]);
 
   // Quick section count per grade state for Step 3 (Sections Generator)
   const [sectionsCountByGrade, setSectionsCountByGrade] = useState<Record<string, number>>(() => {
@@ -91,25 +148,137 @@ export default function SchoolWizardStepper({
   const updateSchool = useCallback((updater: (prev: SchoolData) => SchoolData) => {
     setSchool((prev) => {
       const next = updater(prev);
-      triggerAutoSave(next);
+      queueMicrotask(() => triggerAutoSave(next));
       return next;
     });
   }, [triggerAutoSave]);
 
   // ---------------------------------------------------------------------------
-  // STEP 1 HANDLERS: Stage, Preset & System
+  // STEP 1 HANDLERS: Working Days, Stage & Subject Catalog Browser
   // ---------------------------------------------------------------------------
-  const handleApplyPreset = (preset: SchoolPreset) => {
-    const newSchool = createSchoolFromPreset(preset.id, {
-      schoolName: school.name || preset.label,
-      sectionsPerGrade: 1,
+  const WEEKDAY_ORDER = [6, 0, 1, 2, 3, 4, 5]; // السبت -> الجمعة
+
+  const displayedCatalogSubjects = useMemo(() => {
+    return getSubjectsForStageAndType(selectedStage, selectedEduType);
+  }, [selectedStage, selectedEduType]);
+
+  // Reset selection checkboxes when switching stage or education type
+  useEffect(() => {
+    setSelectedCatalogIds([]);
+  }, [selectedStage, selectedEduType]);
+
+  const handleToggleWorkingDay = (day: number) => {
+    updateSchool((prev) => {
+      const exists = prev.days.includes(day);
+      if (exists && prev.days.length <= 1) return prev; // keep at least 1 active day
+      const nextDays = exists
+        ? prev.days.filter((d) => d !== day)
+        : [...prev.days, day];
+      nextDays.sort((a, b) => WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b));
+      return { ...prev, days: nextDays };
     });
-    setSchool(newSchool);
-    // Update grade section counters
-    const counts: Record<string, number> = {};
-    for (const g of newSchool.grades) counts[g.id] = 1;
-    setSectionsCountByGrade(counts);
-    triggerAutoSave(newSchool);
+  };
+
+  const handleSetWorkingWeekPreset = (daysPreset: number[]) => {
+    updateSchool((prev) => ({ ...prev, days: daysPreset }));
+  };
+
+  const isCatalogSubjectInSchool = useCallback((item: CatalogSubjectItem) => {
+    return school.subjects.some(
+      (s) =>
+        s.id === item.id ||
+        subjectsMatchEquivalent(s.name, item.name, item.aliases) ||
+        (s.code && subjectsMatchEquivalent(s.code, item.name, item.aliases))
+    );
+  }, [school.subjects]);
+
+  const handleAddCatalogSubjects = (items: CatalogSubjectItem[]) => {
+    if (items.length === 0) return;
+    updateSchool((prev) => {
+      const currentList = [...prev.subjects];
+      const toAdd: Subject[] = [];
+      for (const item of items) {
+        const alreadyExists = currentList.some(
+          (s) =>
+            s.id === item.id ||
+            subjectsMatchEquivalent(s.name, item.name, item.aliases) ||
+            (s.code && subjectsMatchEquivalent(s.code, item.name, item.aliases))
+        );
+        if (alreadyExists) continue;
+        const createdSubj: Subject = {
+          id: item.id,
+          name: item.name,
+          code: item.code,
+          before_break: Boolean(item.before_break),
+          double_period_policy:
+            item.double_policy === "DOUBLE_REQUIRED"
+              ? "DOUBLE_REQUIRED"
+              : item.double_policy === "SINGLE_ONLY"
+              ? "SINGLE_ONLY"
+              : "FREE",
+        };
+        currentList.push(createdSubj);
+        toAdd.push(createdSubj);
+      }
+      if (toAdd.length === 0) return prev;
+      return { ...prev, subjects: [...prev.subjects, ...toAdd] };
+    });
+  };
+
+  const handleToggleCatalogCheckbox = (id: string) => {
+    setSelectedCatalogIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllCatalog = () => {
+    const allIds = displayedCatalogSubjects.filter((s) => !isCatalogSubjectInSchool(s)).map((s) => s.id);
+    const allSelected = allIds.length > 0 && allIds.every((id) => selectedCatalogIds.includes(id));
+    setSelectedCatalogIds(allSelected ? [] : allIds);
+  };
+
+  const handleQuickAddCustomSubject = () => {
+    const cleanName = quickCustomSubjectName.trim();
+    if (!cleanName) return;
+    updateSchool((prev) => {
+      if (prev.subjects.some((s) => s.name.trim().toLowerCase() === cleanName.toLowerCase())) {
+        return prev;
+      }
+      const newSubj: Subject = {
+        id: `subj_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+        name: cleanName,
+        code: cleanName.slice(0, 8),
+        double_period_policy: "FREE",
+        before_break: false,
+      };
+      return { ...prev, subjects: [...prev.subjects, newSubj] };
+    });
+    setQuickCustomSubjectName("");
+  };
+
+  const handleApplyStageGrades = (stage: CatalogStage) => {
+    const nextGrades = buildDefaultGradesForStage(stage);
+    updateSchool((prev) => {
+      const nextSections: Section[] = [];
+      const counts: Record<string, number> = {};
+      nextGrades.forEach((g) => {
+        counts[g.id] = 1;
+        nextSections.push({
+          id: `sec_${g.id}_1`,
+          grade_id: g.id,
+          name: `${g.order}/1`,
+          code: `${g.order}/1`,
+          shift: "FIRST",
+        });
+      });
+      setSectionsCountByGrade(counts);
+      return {
+        ...prev,
+        grades: nextGrades,
+        sections: prev.sections.length === 0 ? nextSections : prev.sections,
+        metadata: { ...prev.metadata, stage },
+      };
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -238,10 +407,12 @@ export default function SchoolWizardStepper({
   // ---------------------------------------------------------------------------
   const handleAddSingleTeacher = () => {
     const newIdx = school.teachers.length + 1;
+    const defaultSubj = school.subjects[0]?.id;
     const newTeacher: Teacher = {
       id: `tch_${Date.now().toString(36)}`,
       name: `معلم ${newIdx}`,
       code: `م-${newIdx}`,
+      subject_ids: defaultSubj ? [defaultSubj] : [],
       max_daily_periods: 7,
       max_weekly_periods: 24,
       max_consecutive_periods: 2,
@@ -249,6 +420,30 @@ export default function SchoolWizardStepper({
     updateSchool((prev) => ({
       ...prev,
       teachers: [...prev.teachers, newTeacher],
+    }));
+  };
+
+  const handleToggleTeacherSubject = (teacherId: string, subjectId: string) => {
+    updateSchool((prev) => ({
+      ...prev,
+      teachers: prev.teachers.map((t) => {
+        if (t.id !== teacherId) return t;
+        const current = getTeacherSubjectIds(t);
+        const exists = current.includes(subjectId);
+        const next = exists ? current.filter((id) => id !== subjectId) : [...current, subjectId];
+        return { ...t, subject_ids: next };
+      }),
+    }));
+  };
+
+  const handleSetPrimaryTeacherSubject = (teacherId: string, subjectId: string) => {
+    updateSchool((prev) => ({
+      ...prev,
+      teachers: prev.teachers.map((t) => {
+        if (t.id !== teacherId) return t;
+        const current = getTeacherSubjectIds(t).filter((id) => id !== subjectId);
+        return { ...t, subject_ids: subjectId ? [subjectId, ...current] : current };
+      }),
     }));
   };
 
@@ -287,6 +482,7 @@ export default function SchoolWizardStepper({
             id: tId,
             name,
             code,
+            subject_ids: bulkSubjectId ? [bulkSubjectId] : [],
             max_daily_periods: 7,
             max_weekly_periods: 24,
             max_consecutive_periods: 2,
@@ -351,8 +547,11 @@ export default function SchoolWizardStepper({
       const teacherWorkload: Record<string, number> = {};
       prev.teachers.forEach((t) => (teacherWorkload[t.id] = 0));
 
-      // 1. Group teachers by subject affinity (checking name or code)
+      // 1. Group teachers by explicit subject_ids first, then name/code affinity
       const getTeachersForSubject = (subj: Subject): Teacher[] => {
+        const explicit = prev.teachers.filter((t) => t.subject_ids?.includes(subj.id));
+        if (explicit.length > 0) return explicit;
+
         const sName = subj.name.toLowerCase();
         const sCode = subj.code.toLowerCase();
         const matching = prev.teachers.filter((t) => {
@@ -419,6 +618,7 @@ export default function SchoolWizardStepper({
             id: tId,
             name: tName,
             code: `م-${subj.code}${i}`,
+            subject_ids: [subj.id],
             max_daily_periods: 7,
             max_weekly_periods: 24,
             max_consecutive_periods: 2,
@@ -446,6 +646,58 @@ export default function SchoolWizardStepper({
     });
   };
 
+  const getSubjectDefaultPeriodsForSection = (sectionId: string, subjectId: string): number => {
+    const existing = school.assignments.find((a) => a.section_id === sectionId && a.subject_id === subjectId);
+    if (existing && existing.weekly_periods > 0) return existing.weekly_periods;
+    const sec = school.sections.find((secItem) => secItem.id === sectionId);
+    if (sec) {
+      const sameGradeAsgn = school.assignments.find((a) => {
+        const otherSec = school.sections.find((sItem) => sItem.id === a.section_id);
+        return otherSec?.grade_id === sec.grade_id && a.subject_id === subjectId && a.weekly_periods > 0;
+      });
+      if (sameGradeAsgn) return sameGradeAsgn.weekly_periods;
+    }
+    const anySubjAsgn = school.assignments.find((a) => a.subject_id === subjectId && a.weekly_periods > 0);
+    return anySubjAsgn?.weekly_periods || 4;
+  };
+
+  const handleToggleTeacherSectionAssignment = (teacherId: string, sectionId: string, subjectId: string) => {
+    updateSchool((prev) => {
+      const existingIdx = prev.assignments.findIndex(
+        (a) => a.section_id === sectionId && a.subject_id === subjectId
+      );
+      if (existingIdx >= 0) {
+        const cur = prev.assignments[existingIdx];
+        if (cur.teacher_id === teacherId) {
+          // Unassign teacher (keep slot unassigned with teacher_id: "")
+          const next = [...prev.assignments];
+          next[existingIdx] = { ...cur, teacher_id: "" };
+          return { ...prev, assignments: next };
+        } else {
+          // Reassign section+subject to selected teacher
+          const next = [...prev.assignments];
+          next[existingIdx] = { ...cur, teacher_id: teacherId };
+          return { ...prev, assignments: next };
+        }
+      } else {
+        const defaultPeriods = getSubjectDefaultPeriodsForSection(sectionId, subjectId);
+        return {
+          ...prev,
+          assignments: [
+            ...prev.assignments,
+            {
+              id: `asgn_${sectionId}_${subjectId}`,
+              section_id: sectionId,
+              subject_id: subjectId,
+              teacher_id: teacherId,
+              weekly_periods: defaultPeriods,
+            },
+          ],
+        };
+      }
+    });
+  };
+
   // ---------------------------------------------------------------------------
   // STEP 6: Final Solve & Transition
   // ---------------------------------------------------------------------------
@@ -458,31 +710,21 @@ export default function SchoolWizardStepper({
       {/* ------------------------------------------------------------------- */}
       {/* HEADER: Title, Stepper Tabs & Auto-Save Indicator                    */}
       {/* ------------------------------------------------------------------- */}
-      <div className="bg-slate-900 text-white p-4 border-b border-slate-800">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2.5">
-            <span className="text-2xl">🧙‍♂️</span>
-            <div>
-              <h1 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
-                معالج المدرسة (6 خطوات)
-              </h1>
-              <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
-                تعديل المراحل والمواد والفصول والمعلمين والإسناد
-              </p>
-            </div>
-          </div>
-
+      <div className="bg-[#FAFAF9] px-3.5 py-2.5 border-b border-[#E7E5E4] space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-extrabold text-[#1C1917]">
+            خطوات إعداد المدرسة (6 خطوات)
+          </span>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-700/50 px-2 py-1 rounded-lg">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>حفظ تلقائي: {lastSavedTime}</span>
-            </div>
-
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#0F766E] bg-[#CCFBF1]/70 border border-[#14B8A6]/50 px-2 py-0.5 rounded-lg">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#0F766E]" aria-hidden="true" />
+              حفظ تلقائي: {lastSavedTime}
+            </span>
             {onCancel && (
               <button
                 type="button"
                 onClick={onCancel}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer"
+                className="bg-white hover:bg-[#E7E5E4] text-[#57534E] hover:text-[#1C1917] border border-[#E7E5E4] px-2.5 py-0.5 rounded-lg text-[11px] font-bold transition cursor-pointer"
               >
                 إغلاق ✕
               </button>
@@ -490,46 +732,41 @@ export default function SchoolWizardStepper({
           </div>
         </div>
 
-        {/* Stepper Navigation Bar */}
+        {/* Compact Stepper Navigation Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
           {WIZARD_STEPS.map((step) => {
             const isActive = currentStep === step.id;
             const isCompleted = currentStep > step.id;
-
             return (
               <button
                 key={step.id}
                 type="button"
                 onClick={() => setCurrentStep(step.id)}
-                className={`py-2 px-2.5 rounded-xl text-start transition flex items-center gap-2 border ${
+                className={`py-1.5 px-2 rounded-lg text-start transition flex items-center gap-1.5 border cursor-pointer ${
                   isActive
-                    ? "bg-blue-600 border-blue-400 text-white shadow-sm ring-1 ring-blue-300/40"
+                    ? "bg-[#0F766E] border-[#0F766E] text-white shadow-2xs"
                     : isCompleted
-                    ? "bg-slate-800/90 border-slate-700 text-slate-300 hover:bg-slate-700/80"
-                    : "bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800/40"
+                    ? "bg-[#CCFBF1]/50 border-[#14B8A6]/50 text-[#0F766E] hover:bg-[#CCFBF1]"
+                    : "bg-white border-[#E7E5E4] text-[#57534E] hover:text-[#1C1917]"
                 }`}
               >
-                <div
-                  className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
+                <span
+                  className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-black shrink-0 ${
                     isActive
-                      ? "bg-white text-blue-700"
+                      ? "bg-white text-[#0F766E]"
                       : isCompleted
-                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                      : "bg-slate-800 text-slate-400"
+                      ? "bg-[#0F766E] text-white"
+                      : "bg-[#FAFAF9] text-[#57534E] border border-[#E7E5E4]"
                   }`}
                 >
                   {isCompleted ? "✓" : step.id}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-black truncate">{step.title}</div>
-                  <div className="text-[10px] text-slate-400 truncate opacity-80">{step.shortDesc}</div>
-                </div>
+                </span>
+                <span className="text-[11px] font-extrabold truncate">{step.title}</span>
               </button>
             );
           })}
         </div>
       </div>
-
       {/* ------------------------------------------------------------------- */}
       {/* BODY: Active Step Content                                           */}
       {/* ------------------------------------------------------------------- */}
@@ -539,37 +776,37 @@ export default function SchoolWizardStepper({
         {/* ================================================================= */}
         {currentStep === 1 && (
           <div className="space-y-5">
-            <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-              <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+            <div className="bg-white p-4 rounded-xl border border-[#E7E5E4] space-y-4">
+              <h2 className="text-sm font-extrabold text-[#1C1917] flex items-center gap-2">
                 <span>🏫</span>
-                بيانات المدرسة الأساسية
+                بيانات المدرسة وأيام العمل
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-extrabold text-slate-700 block mb-1">اسم المدرسة:</label>
+                  <label className="text-xs font-extrabold text-[#1C1917] block mb-1">اسم المدرسة:</label>
                   <input
                     type="text"
                     value={school.name}
                     onChange={(e) => updateSchool((prev) => ({ ...prev, name: e.target.value }))}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-[#E7E5E4] rounded-lg px-3 py-2 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                     placeholder="مثال: مدرسة المستقبل الابتدائية"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-extrabold text-slate-700 block mb-1">العام الدراسي:</label>
+                  <label className="text-xs font-extrabold text-[#1C1917] block mb-1">العام الدراسي:</label>
                   <input
                     type="text"
                     value={school.academic_year}
                     onChange={(e) => updateSchool((prev) => ({ ...prev, academic_year: e.target.value }))}
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-[#E7E5E4] rounded-lg px-3 py-2 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                     placeholder="2026/2027"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-extrabold text-slate-700 block mb-1">نظام الفترات:</label>
+                  <label className="text-xs font-extrabold text-[#1C1917] block mb-1">نظام الفترات:</label>
                   <select
                     value={school.shift_mode || "SINGLE"}
                     onChange={(e) =>
@@ -578,122 +815,297 @@ export default function SchoolWizardStepper({
                         shift_mode: e.target.value as "SINGLE" | "TWO_SHIFTS",
                       }))
                     }
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-[#E7E5E4] rounded-lg px-3 py-2 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                   >
-                    <option value="SINGLE">فترة واحدة (كاملة - 35 حصة أسبوعياً)</option>
-                    <option value="TWO_SHIFTS">فترتان (صباحي 29 حصة / مسائي 36 حصة)</option>
+                    <option value="SINGLE">فترة واحدة (كاملة)</option>
+                    <option value="TWO_SHIFTS">فترتان (صباحي / مسائي)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-xs font-extrabold text-slate-700 block mb-1">عدد الحصص اليومية الافتراضي:</label>
+                  <label className="text-xs font-extrabold text-[#1C1917] block mb-1">عدد الحصص اليومية الافتراضي:</label>
                   <input
                     type="number"
-                    min={5}
-                    max={8}
+                    min={4}
+                    max={10}
                     value={school.periods_per_day}
                     onChange={(e) =>
-                      updateSchool((prev) => ({ ...prev, periods_per_day: Number(e.target.value) || 7 }))
+                      updateSchool((prev) => syncSchoolPeriodsPerDay(prev, Number(e.target.value) || 7))
                     }
-                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-[#E7E5E4] rounded-lg px-3 py-2 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                   />
+                </div>
+              </div>
+
+              {/* Working Days Selector */}
+              <div className="pt-2 border-t border-[#E7E5E4] space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-[#1C1917]">أيام العمل في الأسبوع:</span>
+                    <span className="text-[11px] font-bold bg-[#CCFBF1] text-[#0F766E] px-2 py-0.5 rounded-full tabular-nums">
+                      {school.days.length} أيام
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleSetWorkingWeekPreset([0, 1, 2, 3, 4])}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        school.days.length === 5 && !school.days.includes(6) && !school.days.includes(5)
+                          ? "bg-[#CCFBF1] text-[#0F766E] border-[#14B8A6]"
+                          : "bg-[#FAFAF9] text-[#57534E] border-[#E7E5E4] hover:text-[#1C1917]"
+                      }`}
+                    >
+                      الأحد ← الخميس (5 أيام)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetWorkingWeekPreset([6, 0, 1, 2, 3, 4])}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        school.days.length === 6 && school.days.includes(6) && !school.days.includes(5)
+                          ? "bg-[#CCFBF1] text-[#0F766E] border-[#14B8A6]"
+                          : "bg-[#FAFAF9] text-[#57534E] border-[#E7E5E4] hover:text-[#1C1917]"
+                      }`}
+                    >
+                      السبت ← الخميس (6 أيام)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {WEEKDAY_ORDER.map((dayNum) => {
+                    const isActive = school.days.includes(dayNum);
+                    return (
+                      <button
+                        key={dayNum}
+                        type="button"
+                        onClick={() => handleToggleWorkingDay(dayNum)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                          isActive
+                            ? "bg-[#0F766E] text-white border-[#0F766E] shadow-2xs"
+                            : "bg-[#FAFAF9] text-[#57534E] border-[#E7E5E4] hover:bg-slate-100"
+                        }`}
+                      >
+                        {isActive ? "✓ " : ""}{DAY_NAMES_AR[dayNum]}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            {/* Presets Catalog */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* Stage & Edu-Type Subject Catalog Browser */}
+            <div className="bg-white p-4 rounded-xl border border-[#E7E5E4] space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h3 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-[#1C1917] flex items-center gap-1.5">
                     <span>📚</span>
-                    بدء من نموذج قياسي (قيم شائعة قابلة للتعديل)
+                    عرض وإضافة المواد الدراسية حسب المرحلة ونوع التعليم
                   </h3>
-                  <p className="text-[11px] text-slate-500">
-                    اختر نموذجاً لاستيراد المواد والأنصبة والصفوف الرياضية المتوازنة فوراً دون لمس بياناتك
+                  <p className="text-[11px] text-[#57534E] mt-0.5">
+                    اختر المرحلة ونوع التعليم لاستعراض المواد، ثم حدّد الكل أو أضف ما يناسب مدرستك دون مسح بياناتك الحالية
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => handleApplyStageGrades(selectedStage)}
+                  className="bg-[#FAFAF9] hover:bg-[#CCFBF1]/50 text-[#0F766E] border border-[#14B8A6] text-[11px] font-extrabold px-2.5 py-1 rounded-lg transition cursor-pointer shrink-0"
+                  title="ضبط صفوف المدرسة لتطابق هذه المرحلة"
+                >
+                  اعتماد صفوف {STAGE_LABELS_AR[selectedStage]} ({selectedStage === "PRIMARY" ? 6 : 3} صفوف)
+                </button>
+              </div>
 
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+              {/* Stage & Education Type Buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FAFAF9] p-3 rounded-xl border border-[#E7E5E4]">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-extrabold text-[#57534E] me-1">المرحلة:</span>
+                  {(["PRIMARY", "PREPARATORY", "SECONDARY"] as CatalogStage[]).map((stageKey) => (
+                    <button
+                      key={stageKey}
+                      type="button"
+                      onClick={() => setSelectedStage(stageKey)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition cursor-pointer ${
+                        selectedStage === stageKey
+                          ? "bg-[#0F766E] text-white border-[#0F766E] shadow-2xs"
+                          : "bg-white text-[#1C1917] border-[#E7E5E4] hover:border-[#14B8A6]"
+                      }`}
+                    >
+                      {stageKey === "PRIMARY" ? "ابتدائي" : stageKey === "PREPARATORY" ? "إعدادي" : "ثانوي"}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-extrabold text-[#57534E] me-1">النظام:</span>
+                  {(["GENERAL", "LANGUAGE", "AZHAR"] as CatalogEduType[]).map((eduKey) => (
+                    <button
+                      key={eduKey}
+                      type="button"
+                      onClick={() => setSelectedEduType(eduKey)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition cursor-pointer ${
+                        selectedEduType === eduKey
+                          ? "bg-[#6D28D9] text-white border-[#6D28D9] shadow-2xs"
+                          : "bg-white text-[#1C1917] border-[#E7E5E4] hover:border-[#8B5CF6]"
+                      }`}
+                    >
+                      {EDU_TYPE_LABELS_AR[eduKey]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bulk Action Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-extrabold text-[#1C1917]">
+                  مواد {STAGE_LABELS_AR[selectedStage]} ({EDU_TYPE_LABELS_AR[selectedEduType]}) — {displayedCatalogSubjects.length} مادة
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setPresetCategoryFilter("ALL")}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-                      presetCategoryFilter === "ALL" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    onClick={handleToggleSelectAllCatalog}
+                    className="bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] border border-[#E7E5E4] text-[11px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer"
                   >
-                    الكل ({ALL_SCHOOL_PRESETS.length})
+                    {displayedCatalogSubjects.some((s) => !isCatalogSubjectInSchool(s)) && displayedCatalogSubjects.filter((s) => !isCatalogSubjectInSchool(s)).every((s) => selectedCatalogIds.includes(s.id))
+                      ? "إلغاء تحديد الكل"
+                      : "تحديد الكل"}
                   </button>
+                  {selectedCatalogIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const chosen = displayedCatalogSubjects.filter((s) => selectedCatalogIds.includes(s.id));
+                        handleAddCatalogSubjects(chosen);
+                        setSelectedCatalogIds([]);
+                      }}
+                      className="bg-[#0F766E] hover:bg-[#115E59] text-white text-[11px] font-extrabold px-3 py-1 rounded-lg shadow-2xs transition cursor-pointer"
+                    >
+                      + إضافة المحدد ({selectedCatalogIds.length})
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setPresetCategoryFilter("GOVERNMENT_GENERAL")}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-                      presetCategoryFilter === "GOVERNMENT_GENERAL"
-                        ? "bg-blue-600 text-white shadow-2xs"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    onClick={() => handleAddCatalogSubjects(displayedCatalogSubjects)}
+                    className="bg-[#CCFBF1] hover:bg-[#99F6E4] text-[#0F766E] border border-[#14B8A6] text-[11px] font-extrabold px-3 py-1 rounded-lg transition cursor-pointer"
                   >
-                    حكومي عام
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPresetCategoryFilter("EXPERIMENTAL_LANGUAGE")}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-                      presetCategoryFilter === "EXPERIMENTAL_LANGUAGE"
-                        ? "bg-emerald-600 text-white shadow-2xs"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    تجريبي لغات
+                    + إضافة كل القائمة للمدرسة
                   </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
-                {ALL_SCHOOL_PRESETS.filter(
-                  (p) => presetCategoryFilter === "ALL" || p.school_type === presetCategoryFilter
-                ).map((preset) => (
-                  <div
-                    key={preset.id}
-                    className="p-3 rounded-xl border border-slate-200 hover:border-blue-400 bg-slate-50/50 hover:bg-blue-50/30 transition flex flex-col justify-between text-start"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className="text-xs font-extrabold text-slate-900">{preset.name}</span>
-                        <span
-                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0 ${
-                            preset.school_type === "GOVERNMENT_GENERAL"
-                              ? "bg-blue-100 text-blue-800"
-                              : "bg-emerald-100 text-emerald-800"
-                          }`}
-                        >
-                          {preset.school_type === "GOVERNMENT_GENERAL" ? "حكومي عام" : "تجريبي لغات"}
+              {/* Subject Checklist Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {displayedCatalogSubjects.map((item) => {
+                  const alreadyAdded = isCatalogSubjectInSchool(item);
+                  const isChecked = selectedCatalogIds.includes(item.id);
+                  return (
+                    <div
+                      key={`${selectedStage}_${selectedEduType}_${item.id}`}
+                      className={`p-2.5 rounded-xl border transition flex items-center justify-between gap-2 ${
+                        alreadyAdded
+                          ? "bg-[#CCFBF1]/35 border-[#14B8A6]"
+                          : isChecked
+                          ? "bg-[#EDE9FE]/50 border-[#8B5CF6]"
+                          : "bg-[#FAFAF9] border-[#E7E5E4] hover:border-[#14B8A6]"
+                      }`}
+                    >
+                      <label className="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          disabled={alreadyAdded}
+                          onChange={() => handleToggleCatalogCheckbox(item.id)}
+                          className="w-4 h-4 rounded border-[#D6D3D1] text-[#0F766E] focus:ring-[#0F766E] cursor-pointer disabled:opacity-40 shrink-0"
+                        />
+                        <span className="text-xs font-extrabold text-[#1C1917] truncate" title={item.name}>
+                          {item.name}{item.gradeHint ? ` (${item.gradeHint})` : ""}
                         </span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 leading-relaxed line-clamp-2">
-                        {preset.description}
-                      </p>
+                      </label>
+                      {alreadyAdded ? (
+                        <span className="text-[10px] font-extrabold bg-[#CCFBF1] text-[#0F766E] px-2 py-0.5 rounded-full shrink-0">
+                          مضافة ✓
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleAddCatalogSubjects([item])}
+                          className="text-[11px] font-extrabold bg-[#0F766E] hover:bg-[#115E59] text-white px-2.5 py-0.5 rounded-lg transition shrink-0 cursor-pointer"
+                        >
+                          + إضافة
+                        </button>
+                      )}
                     </div>
+                  );
+                })}
+              </div>
 
-                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-200/60">
-                      <span className="text-[10px] font-bold text-slate-500">
-                        {preset.grades.length} صفوف • {preset.shifts[0]?.weekly_capacity || 35} حصة
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleApplyPreset(preset)}
-                        className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-extrabold px-3 py-1 rounded-lg transition shadow-2xs"
+              {/* Quick Custom Subject Adder */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#E7E5E4]">
+                <input
+                  type="text"
+                  value={quickCustomSubjectName}
+                  onChange={(e) => setQuickCustomSubjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleQuickAddCustomSubject();
+                    }
+                  }}
+                  placeholder="أو اكتب اسم مادة أخرى لإضافتها (مثال: خط، نشاط رياضي، تربية وطنية)..."
+                  className="flex-1 min-w-[220px] border border-[#E7E5E4] rounded-lg px-3 py-1.5 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
+                />
+                <button
+                  type="button"
+                  onClick={handleQuickAddCustomSubject}
+                  disabled={!quickCustomSubjectName.trim()}
+                  className="bg-[#0F766E] hover:bg-[#115E59] disabled:opacity-45 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg transition cursor-pointer"
+                >
+                  + إضافة مادة مخصصة
+                </button>
+              </div>
+
+              {/* Current School Subjects Summary Chips */}
+              <div className="bg-[#FAFAF9] p-3 rounded-xl border border-[#E7E5E4] space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-[#1C1917]">
+                    مواد المدرسة المضافة حالياً ({school.subjects.length}):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(2)}
+                    className="text-[11px] font-extrabold text-[#0F766E] hover:underline cursor-pointer"
+                  >
+                    ضبط قواعد المواد ←
+                  </button>
+                </div>
+                {school.subjects.length === 0 ? (
+                  <p className="text-[11px] text-[#57534E]">
+                    لم تتم إضافة مواد بعد — اختر المرحلة والنظام أعلاه وأضف المواد المطلوبة.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {school.subjects.map((subj) => (
+                      <span
+                        key={subj.id}
+                        className="inline-flex items-center gap-1.5 bg-white border border-[#E7E5E4] text-[#1C1917] text-[11px] font-bold px-2.5 py-1 rounded-lg"
                       >
-                        تطبيق هذا النموذج ↶
-                      </button>
-                    </div>
+                        <span>{subj.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSubject(subj.id, false)}
+                          className="text-[#57534E] hover:text-[#BE123C] font-black cursor-pointer"
+                          title="حذف المادة"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </div>
         )}
-
         {/* ================================================================= */}
         {/* STEP 2: Subjects & Quotas                                         */}
         {/* ================================================================= */}
@@ -705,8 +1117,8 @@ export default function SchoolWizardStepper({
                   <span>📚</span>
                   إدارة المواد الدراسية والقواعد الخاصة
                 </h2>
-                <p className="text-[11px] text-slate-500">
-                  تعديل اسم المادة ورمزها، تفعيلها، وضبط شروط الحصص قبل الفسحة والحصص المزدوجة
+                <p className="text-[11px] text-[#57534E]">
+                  تعديل اسم المادة، وتفعيل شروط الحصص قبل الفسحة والحصص المزدوجة
                 </p>
               </div>
 
@@ -726,7 +1138,6 @@ export default function SchoolWizardStepper({
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 border-b font-extrabold">
                       <th className="p-3 text-start">اسم المادة</th>
-                      <th className="p-3 text-start w-24">الرمز</th>
                       <th className="p-3 text-start">سياسة الحصص المزدوجة</th>
                       <th className="p-3 text-center w-28">قبل الفسحة؟</th>
                       <th className="p-3 text-center w-24">إجراء</th>
@@ -740,15 +1151,7 @@ export default function SchoolWizardStepper({
                             type="text"
                             value={subj.name}
                             onChange={(e) => handleUpdateSubjectName(subj.id, e.target.value)}
-                            className="w-full border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        </td>
-                        <td className="p-2.5">
-                          <input
-                            type="text"
-                            value={subj.code}
-                            onChange={(e) => handleUpdateSubjectCode(subj.id, e.target.value)}
-                            className="w-full border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-center bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full border border-[#D6D3D1] rounded-lg px-2.5 py-1.5 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                           />
                         </td>
                         <td className="p-2.5">
@@ -830,8 +1233,7 @@ export default function SchoolWizardStepper({
                   return (
                     <div key={grade.id} className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-black text-slate-800">{grade.name}</div>
-                        <div className="text-[10px] text-slate-500">رمز الصف: {grade.code}</div>
+                        <div className="text-xs font-black text-[#1C1917]">{grade.name}</div>
                       </div>
 
                       <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-1">
@@ -882,9 +1284,8 @@ export default function SchoolWizardStepper({
                 {school.sections.map((sec) => (
                   <div key={sec.id} className="p-2.5 rounded-lg border border-slate-200 bg-white text-start">
                     <div className="text-xs font-black text-slate-900 truncate">{sec.name}</div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
-                      <span>كود: {sec.code}</span>
-                      <span className="font-bold text-blue-600">
+                    <div className="flex items-center justify-end text-[10px] text-[#57534E] mt-1">
+                      <span className="font-bold text-[#0F766E]">
                         {sec.shift === "SECOND" ? "مسائي" : "صباحي"}
                       </span>
                     </div>
@@ -896,171 +1297,237 @@ export default function SchoolWizardStepper({
         )}
 
         {/* ================================================================= */}
-        {/* STEP 4: Teachers & Bulk Paste                                     */}
+        {/* STEP 4: Teachers & Specialty Assignment (Clean, No Codes)         */}
         {/* ================================================================= */}
         {currentStep === 4 && (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3.5 rounded-xl border border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3.5 rounded-xl border border-[#E7E5E4]">
               <div>
-                <h2 className="text-xs sm:text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                  <span>👨‍🏫</span>
-                  هيئة التدريس ({school.teachers.length} معلماً)
+                <h2 className="text-xs sm:text-sm font-extrabold text-[#1C1917] flex items-center gap-2">
+                  <span>هيئة التدريس ({school.teachers.length} معلماً)</span>
                 </h2>
-                <p className="text-[11px] text-slate-500">
-                  تعديل بيانات المعلمين وأنصبتهم، أو لصق قائمة أسماء المعلمين دفعة واحدة
+                <p className="text-xs text-[#57534E] mt-0.5">
+                  أضف اسم المعلم واختر المادة التي يدرّسها وحدد نصابه الأسبوعي (الرموز التقنية مخفية وتُدار تلقائياً)
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowBulkTeacherModal(true)}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-2xs"
+                  onClick={() => {
+                    if (!bulkSubjectId && school.subjects[0]) setBulkSubjectId(school.subjects[0].id);
+                    setShowBulkTeacherModal(true);
+                  }}
+                  className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] border border-[#E7E5E4] text-xs font-extrabold px-3 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
                 >
-                  <span>📋</span>
-                  <span>لصق قائمة أسماء دفعة واحدة</span>
+                  <span>لصق قائمة أسماء</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handleAddSingleTeacher}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-2xs"
+                  className="bg-[#0F766E] hover:bg-[#115E59] text-white text-xs font-extrabold px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
                 >
-                  <span>➕</span>
-                  <span>إضافة معلم</span>
+                  <span>+ إضافة معلم</span>
                 </button>
               </div>
             </div>
 
-            {/* Teachers Table */}
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
-              <div className="overflow-x-auto max-h-[380px]">
+            {/* Clean 3-Column Teachers Table: Name | Specialty Subject(s) | Weekly Quota */}
+            <div className="bg-white rounded-xl border border-[#E7E5E4] overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto max-h-[420px]">
                 <table className="w-full text-start text-xs border-collapse">
-                  <thead className="sticky top-0 bg-slate-100 text-slate-700 border-b font-extrabold">
+                  <thead className="sticky top-0 bg-[#FAFAF9] text-[#1C1917] border-b border-[#E7E5E4] font-extrabold z-10">
                     <tr>
-                      <th className="p-2.5 text-start">اسم المعلم</th>
-                      <th className="p-2.5 text-start w-28">الرمز المختصر</th>
-                      <th className="p-2.5 text-center w-28">أقصى حصص/يوم</th>
-                      <th className="p-2.5 text-center w-28">نصاب الأسبوع</th>
-                      <th className="p-2.5 text-center w-28">أقصى تتابع</th>
-                      <th className="p-2.5 text-center w-20">إجراء</th>
+                      <th className="p-3 text-start min-w-[180px]">اسم المعلم</th>
+                      <th className="p-3 text-start min-w-[260px]">المادة / التخصص</th>
+                      <th className="p-3 text-center w-32">النصاب الأسبوعي</th>
+                      <th className="p-3 text-center w-20">حذف</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {school.teachers.map((tch) => (
-                      <tr key={tch.id} className="hover:bg-slate-50/70 transition">
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            value={tch.name}
-                            onChange={(e) => handleUpdateTeacher(tch.id, { name: e.target.value })}
-                            className="w-full border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            value={tch.code}
-                            onChange={(e) => handleUpdateTeacher(tch.id, { code: e.target.value })}
-                            className="w-full border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-center bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        </td>
-                        <td className="p-2 text-center">
-                          <input
-                            type="number"
-                            min={1}
-                            max={8}
-                            value={tch.max_daily_periods || 7}
-                            onChange={(e) =>
-                              handleUpdateTeacher(tch.id, { max_daily_periods: Number(e.target.value) || 7 })
-                            }
-                            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-center bg-white"
-                          />
-                        </td>
-                        <td className="p-2 text-center">
-                          <input
-                            type="number"
-                            min={1}
-                            max={36}
-                            value={tch.max_weekly_periods || 24}
-                            onChange={(e) =>
-                              handleUpdateTeacher(tch.id, { max_weekly_periods: Number(e.target.value) || 24 })
-                            }
-                            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-center bg-white"
-                          />
-                        </td>
-                        <td className="p-2 text-center">
-                          <input
-                            type="number"
-                            min={1}
-                            max={4}
-                            value={tch.max_consecutive_periods || 2}
-                            onChange={(e) =>
-                              handleUpdateTeacher(tch.id, { max_consecutive_periods: Number(e.target.value) || 2 })
-                            }
-                            className="w-16 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-center bg-white"
-                          />
-                        </td>
-                        <td className="p-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTeacher(tch.id)}
-                            className="text-rose-600 hover:text-rose-800 p-1 rounded hover:bg-rose-50"
-                            title="حذف المعلم"
-                          >
-                            🗑️
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                  <tbody className="divide-y divide-[#E7E5E4]">
+                    {school.teachers.map((tch) => {
+                      const tSubjIds = getTeacherSubjectIds(tch);
+                      const primarySubjId = tSubjIds[0] || "";
+                      return (
+                        <tr key={tch.id} className="hover:bg-[#FAFAF9] transition">
+                          <td className="p-2.5">
+                            <input
+                              type="text"
+                              value={tch.name}
+                              onChange={(e) => handleUpdateTeacher(tch.id, { name: e.target.value })}
+                              className="w-full border border-[#D6D3D1] rounded-lg px-3 py-1.5 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
+                              placeholder="اسم المعلم..."
+                            />
+                          </td>
+                          <td className="p-2">
+                            <div className="space-y-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <select
+                                  value={primarySubjId}
+                                  onChange={(e) => handleSetPrimaryTeacherSubject(tch.id, e.target.value)}
+                                  className="flex-1 min-w-0 border border-[#D6D3D1] rounded-lg px-2.5 py-1.5 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
+                                >
+                                  <option value="">(اختر المادة الرئيسية...)</option>
+                                  {school.subjects.map((sub) => (
+                                    <option key={sub.id} value={sub.id}>
+                                      {sub.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                {school.subjects.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedExtraTeacherId((prev) => (prev === tch.id ? null : tch.id))
+                                    }
+                                    className={`px-2 py-1.5 rounded-lg text-[10.5px] font-bold border transition shrink-0 cursor-pointer ${
+                                      expandedExtraTeacherId === tch.id
+                                        ? "bg-[#1C1917] text-white border-[#1C1917]"
+                                        : "bg-[#FAFAF9] text-[#57534E] border-[#E7E5E4] hover:border-[#14B8A6] hover:text-[#0F766E]"
+                                    }`}
+                                    title="إضافة مادة إضافية لهذا المعلم"
+                                  >
+                                    + تخصص
+                                  </button>
+                                )}
+                              </div>
+                              {/* Show active extra subjects cleanly as removable chips */}
+                              {tSubjIds.filter((id) => id !== primarySubjId).length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {school.subjects
+                                    .filter((sub) => sub.id !== primarySubjId && tSubjIds.includes(sub.id))
+                                    .map((sub) => (
+                                      <button
+                                        key={sub.id}
+                                        type="button"
+                                        onClick={() => handleToggleTeacherSubject(tch.id, sub.id)}
+                                        className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#CCFBF1] text-[#0F766E] border border-[#14B8A6] hover:bg-[#FFF1F2] hover:text-[#BE123C] hover:border-[#FB7185] transition cursor-pointer"
+                                        title="انقر لإزالة التخصص الإضافي"
+                                      >
+                                        {sub.name} ×
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                              {/* Expanded picker only for the teacher being edited */}
+                              {expandedExtraTeacherId === tch.id && (
+                                <div className="flex flex-wrap gap-1 p-2 rounded-lg bg-[#FAFAF9] border border-[#E7E5E4]">
+                                  {school.subjects
+                                    .filter((sub) => sub.id !== primarySubjId)
+                                    .map((sub) => {
+                                      const isExtra = tSubjIds.includes(sub.id);
+                                      return (
+                                        <button
+                                          key={sub.id}
+                                          type="button"
+                                          onClick={() => handleToggleTeacherSubject(tch.id, sub.id)}
+                                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                                            isExtra
+                                              ? "bg-[#0F766E] text-white border-[#0F766E]"
+                                              : "bg-white text-[#57534E] border-[#E7E5E4] hover:border-[#14B8A6]"
+                                          }`}
+                                        >
+                                          {isExtra ? `✓ ${sub.name}` : `+ ${sub.name}`}
+                                        </button>
+                                      );
+                                    })}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <input
+                              type="number"
+                              min={1}
+                              max={36}
+                              value={tch.max_weekly_periods || 24}
+                              onChange={(e) =>
+                                handleUpdateTeacher(tch.id, { max_weekly_periods: Number(e.target.value) || 24 })
+                              }
+                              className="w-20 border border-[#D6D3D1] rounded-lg px-2 py-1.5 text-xs font-bold text-center bg-white text-[#1C1917] tabular-nums focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
+                            />
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTeacher(tch.id)}
+                              className="min-w-[32px] min-h-[32px] text-[#BE123C] hover:bg-[#FFF1F2] border border-transparent hover:border-[#FB7185] px-2 py-1 rounded-lg text-xs font-bold transition cursor-pointer"
+                              title="حذف المعلم"
+                              aria-label={`حذف ${tch.name}`}
+                            >
+                              حذف
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            {/* Bulk Add Modal */}
+            {/* Bulk Add Modal with Specialty Subject Selector */}
             {showBulkTeacherModal && (
-              <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-5 space-y-4">
-                  <div className="flex items-center justify-between border-b pb-2.5">
-                    <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                      <span>📋</span>
-                      إضافة عدة معلمين دفعة واحدة (سطر لكل معلم)
+              <div className="fixed inset-0 bg-[#1C1917]/60 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-xl border border-[#E7E5E4] max-w-lg w-full p-5 space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#E7E5E4] pb-2.5">
+                    <h3 className="text-sm font-extrabold text-[#1C1917]">
+                      إضافة عدة معلمين دفعة واحدة
                     </h3>
                     <button
                       type="button"
                       onClick={() => setShowBulkTeacherModal(false)}
-                      className="text-slate-400 hover:text-slate-600 font-bold"
+                      className="text-[#57534E] hover:text-[#1C1917] font-bold px-2 py-1 cursor-pointer"
+                      aria-label="إغلاق"
                     >
                       ✕
                     </button>
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    <label className="text-xs font-bold text-[#1C1917] block mb-1.5">
+                      اختر المادة لهؤلاء المعلمين (اختياري):
+                    </label>
+                    <select
+                      value={bulkSubjectId}
+                      onChange={(e) => setBulkSubjectId(e.target.value)}
+                      className="w-full border border-[#D6D3D1] rounded-xl px-3 py-2 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
+                    >
+                      <option value="">(بدون تحديد مسبق)</option>
+                      {school.subjects.map((sub) => (
+                        <option key={sub.id} value={sub.id}>
+                          {sub.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-[#1C1917] block mb-1.5">
                       الصق قائمة الأسماء هنا (اسم في كل سطر):
                     </label>
                     <textarea
-                      rows={8}
+                      rows={7}
                       value={bulkTeachersText}
                       onChange={(e) => setBulkTeachersText(e.target.value)}
                       placeholder={"أحمد محمود\nسيد عبد العال\nمنى إبراهيم\nحسام حسن"}
-                      className="w-full border border-slate-300 rounded-xl p-3 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full border border-[#D6D3D1] rounded-xl p-3 text-xs font-bold bg-white text-[#1C1917] placeholder:text-[#57534E] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                     />
                   </div>
 
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t">
+                  <div className="flex items-center justify-end gap-2 pt-2">
                     <button
                       type="button"
                       onClick={() => setShowBulkTeacherModal(false)}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-4 py-2 rounded-xl"
+                      className="bg-[#FAFAF9] hover:bg-[#E7E5E4] border border-[#E7E5E4] text-[#1C1917] text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
                     >
                       إلغاء
                     </button>
                     <button
                       type="button"
                       onClick={handleBulkAddTeachers}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold px-5 py-2 rounded-xl shadow-2xs"
+                      className="bg-[#0F766E] hover:bg-[#115E59] text-white text-xs font-extrabold px-5 py-2 rounded-xl shadow-2xs cursor-pointer"
                     >
                       إضافة الأسماء الآن
                     </button>
@@ -1072,130 +1539,305 @@ export default function SchoolWizardStepper({
         )}
 
         {/* ================================================================= */}
-        {/* STEP 5: Assignment Matrix                                         */}
+        {/* STEP 5: Smart Teacher-Centric Assignment Studio                   */}
         {/* ================================================================= */}
         {currentStep === 5 && (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3.5 rounded-xl border border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-3.5 rounded-xl border border-[#E7E5E4]">
               <div>
-                <h2 className="text-xs sm:text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                  <span>🧩</span>
-                  مصفوفة إسناد المواد للمعلمين
+                <h2 className="text-xs sm:text-sm font-extrabold text-[#1C1917]">
+                  إسناد الفصول والحصص للمعلمين
                 </h2>
-                <p className="text-[11px] text-slate-500">
-                  إسناد كل حصة لمعلم محدد، أو استخدام التوزيع التلقائي الذكي المتوازن
+                <p className="text-xs text-[#57534E] mt-0.5">
+                  اختر المعلم، ثم اضغط على الفصول التي يدرّسها — تُحتسب الحصص والنصاب تلقائياً
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleGenerateSpecialistTeachers}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-2xs"
+                  className="bg-[#FFFFFF] hover:bg-[#FAFAF9] text-[#1C1917] border border-[#E7E5E4] text-xs font-extrabold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
                   title="إنشاء معلمين متخصصين لكل مادة وإسناد الحصص لهم فوراً"
                 >
-                  <span>⚡</span>
-                  <span>معلمون متخصصون تلقائياً</span>
+                  <span>إنشاء متخصصين تلقائياً</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handleAutoBalanceTeachers}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-2xs"
+                  className="bg-[#0F766E] hover:bg-[#115E59] text-white text-xs font-extrabold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
                 >
-                  <span>⚖️</span>
-                  <span>توزيع متوازن على المعلمين الحاليين</span>
+                  <span>توزيع متوازن تلقائي</span>
                 </button>
               </div>
             </div>
 
-            {/* Matrix Capacity Status Bar */}
+            {/* Capacity Status Bar */}
             <div
-              className={`p-3 rounded-xl border flex items-center justify-between text-xs font-bold ${
+              className={`p-3 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs font-bold ${
                 capacityValidation.errors.length === 0
-                  ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-                  : "bg-amber-50 border-amber-200 text-amber-900"
+                  ? "bg-[#CCFBF1]/45 border-[#14B8A6] text-[#0F766E]"
+                  : "bg-[#FFF1F2] border-[#FB7185] text-[#BE123C]"
               }`}
             >
-              <div className="flex items-center gap-2">
-                <span>{capacityValidation.errors.length === 0 ? "✅" : "⚠️"}</span>
-                <span>
-                  إجمالي الحصص المسندة: {capacityValidation.total_assigned} من أصل {capacityValidation.total_capacity} حصة سعة المدرسة
-                </span>
-              </div>
-              <span className="text-[11px]">
+              <span>
+                إجمالي الحصص المسندة: {capacityValidation.total_assigned} من أصل {capacityValidation.total_capacity} حصة سعة المدرسة
+              </span>
+              <span>
                 {capacityValidation.errors.length === 0
-                  ? "السعة الأسبوعية متطابقة 100% مع الفصول"
+                  ? "✓ السعة الأسبوعية متطابقة 100%"
                   : capacityValidation.errors[0]}
               </span>
             </div>
 
-            {/* Matrix Table */}
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
-              <div className="overflow-x-auto max-h-[420px]">
-                <table className="w-full text-start text-xs border-collapse">
-                  <thead className="sticky top-0 bg-slate-100 text-slate-800 border-b font-extrabold z-10">
-                    <tr>
-                      <th className="p-2.5 text-start bg-slate-100 border-e w-32 sticky start-0 z-20">الفصل</th>
-                      {school.subjects.map((subj) => (
-                        <th key={subj.id} className="p-2 text-center min-w-[140px] border-e">
-                          <div>{subj.name}</div>
-                          <div className="text-[10px] text-slate-500 font-normal">({subj.code})</div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {school.sections.map((sec) => (
-                      <tr key={sec.id} className="hover:bg-slate-50/70 transition">
-                        <td className="p-2.5 font-black text-slate-800 bg-slate-50 border-e sticky start-0 z-10 truncate">
-                          {sec.name}
-                        </td>
-                        {school.subjects.map((subj) => {
-                          const asgn = school.assignments.find(
-                            (a) => a.section_id === sec.id && a.subject_id === subj.id
-                          );
-                          const periods = asgn?.weekly_periods || 0;
-                          const currentTeacherId = asgn?.teacher_id || "";
+            {/* Two-Column Teacher-Centric Studio */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              {/* Teachers List with Live Quota Progress */}
+              <div className="lg:col-span-4 bg-white rounded-xl border border-[#E7E5E4] p-3 space-y-2 max-h-[500px] overflow-y-auto">
+                <div className="text-xs font-extrabold text-[#1C1917] pb-1.5 border-b border-[#E7E5E4] flex items-center justify-between">
+                  <span>هيئة التدريس ({school.teachers.length})</span>
+                  <span className="text-[11px] font-bold text-[#57534E]">الحصص / النصاب</span>
+                </div>
 
+                {school.teachers.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-[#57534E]">
+                    لا يوجد معلمون بعد. ارجع للخطوة 4 لإضافتهم أو اضغط "إنشاء متخصصين تلقائياً".
+                  </div>
+                ) : (
+                  school.teachers.map((tch) => {
+                    const isSelected = activeAssignTeacher?.id === tch.id;
+                    const assignedSum = school.assignments
+                      .filter((a) => a.teacher_id === tch.id)
+                      .reduce((sum, a) => sum + (Number(a.weekly_periods) || 0), 0);
+                    const maxQuota = tch.max_weekly_periods || 24;
+                    const overQuota = assignedSum > maxQuota;
+                    const tSubjNames = getTeacherSubjectIds(tch)
+                      .map((sid) => school.subjects.find((sub) => sub.id === sid)?.name)
+                      .filter(Boolean)
+                      .join("، ");
+
+                    return (
+                      <button
+                        key={tch.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedAssignTeacherId(tch.id);
+                          const firstSubj = getTeacherSubjectIds(tch)[0];
+                          if (firstSubj) setSelectedAssignSubjectId(firstSubj);
+                        }}
+                        className={`w-full text-start p-2.5 rounded-xl border transition cursor-pointer space-y-1.5 ${
+                          isSelected
+                            ? "bg-[#CCFBF1]/50 border-[#14B8A6] shadow-2xs"
+                            : "bg-[#FAFAF9] border-[#E7E5E4] hover:bg-white hover:border-[#D6D3D1]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-extrabold text-xs text-[#1C1917] truncate">{tch.name}</span>
+                          <span
+                            className={`text-[11px] font-black px-2 py-0.5 rounded-full tabular-nums shrink-0 ${
+                              overQuota
+                                ? "bg-[#FFF1F2] text-[#BE123C] border border-[#FB7185]"
+                                : assignedSum > 0
+                                ? "bg-[#CCFBF1] text-[#0F766E]"
+                                : "bg-[#E7E5E4] text-[#57534E]"
+                            }`}
+                          >
+                            {assignedSum} / {maxQuota}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#57534E] truncate">
+                          {tSubjNames || "لم يُحدد تخصص بعد"}
+                        </div>
+                        <div className="w-full h-1.5 bg-[#E7E5E4] rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${overQuota ? "bg-[#BE123C]" : "bg-[#0F766E]"}`}
+                            style={{ width: `${Math.min(100, Math.round((assignedSum / Math.max(1, maxQuota)) * 100))}%` }}
+                          />
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Selected Teacher Section Picker */}
+              <div className="lg:col-span-8 bg-white rounded-xl border border-[#E7E5E4] p-4 space-y-4">
+                {activeAssignTeacher ? (
+                  <>
+                    {/* Teacher Quota Summary Header */}
+                    {(() => {
+                      const tchAsgns = school.assignments.filter((a) => a.teacher_id === activeAssignTeacher.id);
+                      const tchTotal = tchAsgns.reduce((sum, a) => sum + (Number(a.weekly_periods) || 0), 0);
+                      const maxQuota = activeAssignTeacher.max_weekly_periods || 24;
+                      const remaining = maxQuota - tchTotal;
+
+                      return (
+                        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#E7E5E4]">
+                          <div>
+                            <h3 className="text-sm font-extrabold text-[#1C1917]">
+                              إسناد فصول: {activeAssignTeacher.name}
+                            </h3>
+                            <p className="text-xs text-[#57534E] mt-0.5 tabular-nums">
+                              المُسند حالياً: <strong className="text-[#1C1917]">{tchTotal}</strong> حصة من أصل <strong className="text-[#1C1917]">{maxQuota}</strong>{" "}
+                              {remaining >= 0 ? `(المتبقي المتاح: ${remaining} حصة)` : `(تجاوز النصاب بـ ${Math.abs(remaining)} حصة!)`}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-bold text-[#57534E]">النصاب:</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={36}
+                              value={maxQuota}
+                              onChange={(e) =>
+                                handleUpdateTeacher(activeAssignTeacher.id, {
+                                  max_weekly_periods: Number(e.target.value) || 24,
+                                })
+                              }
+                              className="w-16 border border-[#D6D3D1] rounded-lg px-2 py-1 text-xs font-bold text-center bg-white text-[#1C1917] tabular-nums"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Subject Selector (Defaults to teacher's chosen specialty subjects) */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#1C1917]">المادة المُسندة:</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllSubjectsForTeacher(!showAllSubjectsForTeacher)}
+                          className="text-[11px] font-bold text-[#0F766E] hover:underline cursor-pointer"
+                        >
+                          {showAllSubjectsForTeacher ? "عرض تخصص المعلم فقط" : "إظهار كل مواد المدرسة"}
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(showAllSubjectsForTeacher || activeTeacherSubjIds.length === 0
+                          ? school.subjects
+                          : school.subjects.filter((sub) => activeTeacherSubjIds.includes(sub.id))
+                        ).map((sub) => {
+                          const isCur = effectiveAssignSubjectId === sub.id;
                           return (
-                            <td key={subj.id} className="p-2 border-e text-center">
-                              <div className="flex flex-col gap-1 items-center">
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    max={12}
-                                    value={periods}
-                                    onChange={(e) =>
-                                      handleUpdateAssignmentPeriods(sec.id, subj.id, Number(e.target.value) || 0)
-                                    }
-                                    className="w-10 text-center border border-slate-200 rounded px-1 py-0.5 text-xs font-black bg-white"
-                                    title="عدد الحصص الأسبوعية"
-                                  />
-                                  <span className="text-[10px] text-slate-500">حصة</span>
-                                </div>
-
-                                <select
-                                  value={currentTeacherId}
-                                  onChange={(e) => handleAssignTeacher(sec.id, subj.id, e.target.value)}
-                                  className="w-full border border-slate-200 rounded px-1.5 py-1 text-[11px] font-bold bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 truncate"
-                                >
-                                  <option value="">(اختر المعلم)</option>
-                                  {school.teachers.map((tch) => (
-                                    <option key={tch.id} value={tch.id}>
-                                      {tch.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </td>
+                            <button
+                              key={sub.id}
+                              type="button"
+                              onClick={() => setSelectedAssignSubjectId(sub.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                                isCur
+                                  ? "bg-[#0F766E] text-white border-[#0F766E]"
+                                  : "bg-[#FAFAF9] text-[#1C1917] border-[#E7E5E4] hover:border-[#14B8A6]"
+                              }`}
+                            >
+                              {sub.name}
+                            </button>
                           );
                         })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </div>
+                    </div>
+
+                    {/* Sections Grid grouped by Grade with Auto-filled Periods & +/- Stepper */}
+                    <div className="space-y-3">
+                      <div className="text-xs font-bold text-[#1C1917]">
+                        اختر الفصول (تُملأ الحصص تلقائياً حسب نصاب المادة في كل صف):
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[260px] overflow-y-auto p-1">
+                        {school.sections.map((sec) => {
+                          const asgn = school.assignments.find(
+                            (a) => a.section_id === sec.id && a.subject_id === effectiveAssignSubjectId
+                          );
+                          const isAssignedToThis = asgn?.teacher_id === activeAssignTeacher.id;
+                          const assignedOtherTeacher =
+                            asgn?.teacher_id && asgn.teacher_id !== activeAssignTeacher.id
+                              ? school.teachers.find((t) => t.id === asgn.teacher_id)
+                              : null;
+                          const periodsVal = asgn?.weekly_periods || getSubjectDefaultPeriodsForSection(sec.id, effectiveAssignSubjectId);
+
+                          return (
+                            <div
+                              key={sec.id}
+                              className={`p-2.5 rounded-xl border transition flex flex-col justify-between gap-2 ${
+                                isAssignedToThis
+                                  ? "bg-[#CCFBF1]/55 border-[#14B8A6] shadow-2xs"
+                                  : assignedOtherTeacher
+                                  ? "bg-[#FAFAF9] border-[#E7E5E4] opacity-80"
+                                  : "bg-white border-[#E7E5E4] hover:border-[#14B8A6]"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleToggleTeacherSectionAssignment(
+                                    activeAssignTeacher.id,
+                                    sec.id,
+                                    effectiveAssignSubjectId
+                                  )
+                                }
+                                className="w-full text-start cursor-pointer"
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="font-extrabold text-xs text-[#1C1917]">{sec.name}</span>
+                                  <span className={`text-xs font-black ${isAssignedToThis ? "text-[#0F766E]" : "text-[#57534E]"}`}>
+                                    {isAssignedToThis ? "✓" : "+"}
+                                  </span>
+                                </div>
+                                {assignedOtherTeacher && (
+                                  <div className="text-[10px] text-[#57534E] truncate mt-0.5">
+                                    مع: {assignedOtherTeacher.name}
+                                  </div>
+                                )}
+                              </button>
+
+                              {isAssignedToThis && (
+                                <div className="flex items-center justify-between pt-1 border-t border-[#14B8A6]/40">
+                                  <span className="text-[11px] font-bold text-[#0F766E]">الحصص:</span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUpdateAssignmentPeriods(sec.id, effectiveAssignSubjectId, Math.max(1, periodsVal - 1))
+                                      }
+                                      className="w-7 h-7 bg-white border border-[#14B8A6] rounded text-xs font-black text-[#0F766E] cursor-pointer"
+                                      aria-label="تقليل حصة"
+                                    >
+                                      −
+                                    </button>
+                                    <span className="w-6 text-center text-xs font-black text-[#1C1917] tabular-nums">
+                                      {periodsVal}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUpdateAssignmentPeriods(sec.id, effectiveAssignSubjectId, Math.min(12, periodsVal + 1))
+                                      }
+                                      className="w-7 h-7 bg-white border border-[#14B8A6] rounded text-xs font-black text-[#0F766E] cursor-pointer"
+                                      aria-label="زيادة حصة"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Active chat constraints tip */}
+                    <div className="p-2.5 rounded-xl bg-[#EDE9FE]/60 border border-[#8B5CF6]/40 text-xs text-[#6D28D9] flex items-center gap-2">
+                      <span aria-hidden="true">✦</span>
+                      <span>الشروط الخاصة (مثل إجازة يوم معين أو حصص أولى وأخيرة) يمكن طلبها مباشرة لاحقاً من <strong>وكيل الجداول الذكي</strong>.</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-8 text-center text-xs text-[#57534E]">
+                    اختر معلماً من القائمة لإسناد الفصول والحصص له.
+                  </div>
+                )}
               </div>
             </div>
           </div>

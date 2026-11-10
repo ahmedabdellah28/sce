@@ -95,6 +95,8 @@ export interface Teacher {
   id: string;
   name: string;
   code: string;
+  /** التخصصات / المواد التي يدرّسها المعلم (تُستخدم لتسهيل الإسناد في الواجهة) */
+  subject_ids?: string[];
   max_daily_periods?: number | null;
   max_weekly_periods?: number | null;
   max_consecutive_periods?: number;

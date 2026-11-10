@@ -1,5 +1,6 @@
 import type { SchoolData, Schedule, AnalysisReport, Teacher, Section, Subject, TimetableEntry } from "../types.ts";
 import { DAY_NAMES_AR } from "../types.ts";
+import { findMatchingSubjectInSchool } from "../presets/commonPresets.ts";
 import { normAr, parseDaysList } from "./arabicRules.ts";
 import {
   findTeachersInMessage,
@@ -46,7 +47,7 @@ export function isQuestionOrInquiry(message: string): boolean {
 
   // Timetable audit & inspection requests
   if (
-    /(افحص|فحص|راجع|مراجعة|شيك|تشييك|تحليل|تقرير|صحة الجدول|هل الجدول مظبوط|هل في تعارض|في تعارض|اي تعارض|مشاكل الجدول)/.test(
+    /(افحص|فحص|راجع|مراجعة|شيك|تشييك|تحليل|تقرير|صحة الجدول|هل الجدول مظبوط|هل في تعارض|في تعارض|اي تعارض|مشاكل الجدول|عجز|العجز|شاغر|معنى س\d*)/.test(
       n
     )
   ) {
@@ -588,7 +589,7 @@ export function answerSchoolQuestion(
   // -------------------------------------------------------------
   // 7. Subject Specialists (مين بيدرس مادة كذا)
   // -------------------------------------------------------------
-  const subjectFound = findSubjectInMessage(school, message);
+  const subjectFound = findSubjectInMessage(school, message) || findMatchingSubjectInSchool(school.subjects, message);
   if (subjectFound && /(مين بيدرس|مدرسين|معلمين|مدرسي|معلمي|مين ماسك)/.test(n)) {
     const asgs = school.assignments.filter((a) => a.subject_id === subjectFound.id);
     const teachersMap = new Map<string, { teacher: Teacher; sections: string[]; periods: number }>();
@@ -667,6 +668,41 @@ export function answerSchoolQuestion(
   }
 
   // -------------------------------------------------------------
+  // 8B. Deficit / Shortage Teachers Inquiries ("س" / "س1" / "س2" / "عجز")
+  // -------------------------------------------------------------
+  if (/(عجز|العجز|شاغر|خانات شاغرة|معنى س|(?:^|\s)س(?:\s*\d+|\s+[\u0600-\u06FF]+)?(?:\s|$)|نقص الحصص)/.test(n)) {
+    const deficitTeachers = school.teachers.filter(
+      (t) => t.name.includes("شاغر") || t.name.includes("عجز") || /^(?:س(?:\s|$)|س\s*\d|س\s+[\u0600-\u06FF]+)/.test(normAr(t.name))
+    );
+    const deficitLines = deficitTeachers.map((t) => {
+      const asgs = school.assignments.filter((a) => a.teacher_id === t.id);
+      const totalP = asgs.reduce((s, a) => s + a.weekly_periods, 0);
+      const subjNames = [...new Set(asgs.map((a) => school.subjects.find((sub) => sub.id === a.subject_id)?.name).filter(Boolean))].join("، ");
+      const secNames = asgs.map((a) => `${school.sections.find((sec) => sec.id === a.section_id)?.name || a.section_id} (${a.weekly_periods})`).join("، ");
+      return `• **${t.name}** — ${subjNames || "غير محدد"}: ${totalP} حصة في الفصول [${secNames || "بدون إسناد"}]`;
+    });
+    const totalDeficitPeriods = deficitTeachers.reduce(
+      (sum, t) => sum + school.assignments.filter((a) => a.teacher_id === t.id).reduce((s, a) => s + a.weekly_periods, 0),
+      0
+    );
+    const gapSections = (analysis?.section_reports || []).filter((r) => r.difference < 0);
+    const gapLines = gapSections.map((r) => `• فصل ${r.section_name}: ينقصه ${Math.abs(r.difference)} حصة (${r.assigned_periods}/${r.expected_periods})`);
+
+    return {
+      answered: true,
+      is_query: true,
+      topic: "deficit_report",
+      reply:
+        `📌 تقرير الخانات الشاغرة (الرمز "س" مثل س1، س2 يدل على احتياج معلم / خانة شاغرة مؤقتاً) في "${school.name}":\n\n` +
+        (deficitLines.length > 0
+          ? `إجمالي الحصص الشاغرة المسندة لخانات (س): ${totalDeficitPeriods} حصة موزعة على ${deficitTeachers.length} خانات:\n${deficitLines.join("\n")}`
+          : "لا توجد خانات شاغرة (س) مسجلة في كشوف المعلمين حالياً.") +
+        (gapLines.length > 0 ? `\n\n⚠️ فصول بها نقص في إجمالي الحصص:\n${gapLines.join("\n")}` : "\n\n✓ جميع الفصول مكتملة النصاب دون نقص حصص.") +
+        `\n\n💡 عند توفر معلم جديد، قل لي مثلاً: "شيل س1 وحط مكانه الأستاذ فلان".`,
+    };
+  }
+
+  // -------------------------------------------------------------
   // 9. General School Statistics
   // -------------------------------------------------------------
   if (/(كم معلم|عدد المعلمين|احصائيات|إحصائيات|بيانات المدرسة|ملخص المدرسة)/.test(n)) {
@@ -701,7 +737,7 @@ export function answerSchoolQuestion(
       topic: "advice",
       reply:
         `💡 نصائح ومقترحات لتحسين واستقرار جدول مدرسة "${school.name}":\n\n` +
-        `1. توزيع إجازات المعلمين: احرص على عدم تفريغ أكثر من 20% من المعلمين في نفس اليوم (مثل تفريغ الكثيرين يوم الخميس) لتجنب عجز الإشراف والاحتياطي.\n` +
+        `1. توزيع إجازات المعلمين: احرص على عدم تفريغ أكثر من 20% من المعلمين في نفس اليوم (مثل تفريغ الكثيرين يوم الخميس) لتجنب نقص الإشراف والاحتياطي.\n` +
         `2. الحصص المزدوجة (الفترات): المواد الأساسية ذات النصيب المرتفع (اللغة العربية والرياضيات والعلوم) يفضل جدولتها كفترات مزدوجة (ح1-2 أو ح3-4) لتسهيل الشرح العملي والتركيز.\n` +
         `3. الحصص الأولى: المواد التي تتطلب تركيزاً ذهنياً عالياً اجعلها في الحصص الأربع الأولى قبل الفسحة.\n` +
         `4. عدالة الأنصبة: متوسط نصيب المعلم لديك هو ${(school.assignments.reduce((s, a) => s + a.weekly_periods, 0) / (school.teachers.length || 1)).toFixed(1)} حصة؛ يمكنك تبديل تكليفات أي فصل لتحقيق توازن الأنصبة.`,
