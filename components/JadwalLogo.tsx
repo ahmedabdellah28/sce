@@ -291,6 +291,11 @@ export const JadwalLogo: React.FC = () => {
         @media (min-width: 640px) {
           .jadwal-logo { --jl-s: 35px; }
         }
+        html.dark .jadwal-logo {
+          --jl-ink: #2DD4BF;
+          --jl-ai: #A78BFA;
+          --jl-day: #115E59;
+        }
         .jadwal-stage {
           position: relative;
           display: grid;

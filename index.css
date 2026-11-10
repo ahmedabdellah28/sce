@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(html.dark, html.dark *));
+
 :root {
   /* Semantic Color System — Warm Stone + Deep Teal + AI Violet */
   --color-bg: #FAFAF9;
@@ -25,6 +27,30 @@
   --color-alert-accent: #FB7185;
   --color-alert-bg: #FFF1F2;
   --color-alert-text: #BE123C;
+}
+
+html.dark {
+  color-scheme: dark;
+  --color-bg: #0C0A09;
+  --color-card: #1C1917;
+  --color-border: #3F3A36;
+  --color-border-strong: #57534E;
+
+  --color-text-primary: #FAF9F7;
+  --color-text-secondary: #D6D3D1;
+
+  --color-primary: #0F766E;
+  --color-primary-hover: #0D9488;
+  --color-primary-soft: #134E4A;
+  --color-primary-accent: #2DD4BF;
+
+  --color-ai-icon: #A78BFA;
+  --color-ai-bg: #2E1065;
+  --color-ai-text: #DDD6FE;
+
+  --color-alert-accent: #FB7185;
+  --color-alert-bg: #4C0519;
+  --color-alert-text: #FECDD3;
 }
 
 body {
@@ -54,6 +80,256 @@ body {
 
 .timetable-scroll::-webkit-scrollbar-thumb:hover {
   background: #A8A29E;
+}
+
+/* Dark Theme Surface, Typography & WCAG AA Contrast Adaptation (Screen only, keeps PDF print white) */
+@media screen {
+  html.dark body {
+    background-color: #0C0A09;
+    color: #FAF9F7;
+  }
+
+  html.dark .timetable-scroll::-webkit-scrollbar-track {
+    background: #1C1917;
+  }
+
+  html.dark .timetable-scroll::-webkit-scrollbar-thumb {
+    background: #44403C;
+  }
+
+  html.dark .timetable-scroll::-webkit-scrollbar-thumb:hover {
+    background: #57534E;
+  }
+
+  /* Elevation Tiers */
+  html.dark .bg-\[\#FAFAF9\] {
+    background-color: #0C0A09;
+  }
+
+  html.dark .bg-\[\#FFFFFF\],
+  html.dark .bg-white,
+  html.dark .bg-white\/95 {
+    background-color: #1C1917;
+  }
+
+  html.dark .bg-\[\#FFFFFF\] .bg-\[\#FAFAF9\],
+  html.dark .bg-white .bg-\[\#FAFAF9\],
+  html.dark header .bg-\[\#FAFAF9\],
+  html.dark .bg-slate-50,
+  html.dark .bg-slate-50\/40,
+  html.dark .bg-slate-50\/50,
+  html.dark .bg-slate-50\/70,
+  html.dark .bg-slate-50\/90 {
+    background-color: #262220;
+  }
+
+  html.dark .bg-slate-100,
+  html.dark .bg-slate-100\/60,
+  html.dark .bg-slate-100\/70,
+  html.dark .bg-slate-200,
+  html.dark .bg-slate-200\/80,
+  html.dark .bg-\[\#E7E5E4\],
+  html.dark .bg-\[\#FAFAF9\] .bg-white,
+  html.dark .bg-slate-50 .bg-white,
+  html.dark .bg-slate-100 .bg-white,
+  html.dark input.bg-white,
+  html.dark select.bg-white,
+  html.dark textarea.bg-white,
+  html.dark input.bg-\[\#FFFFFF\],
+  html.dark select.bg-\[\#FFFFFF\],
+  html.dark textarea.bg-\[\#FFFFFF\] {
+    background-color: #292524;
+  }
+
+  html.dark .bg-\[\#FFFFFF\]\/80 {
+    background-color: #292524;
+  }
+
+  html.dark .bg-\[\#1C1917\].rounded-t-2xl {
+    background-color: #141210;
+  }
+
+  html.dark button.bg-\[\#1C1917\] {
+    background-color: #292524;
+    border-color: #14B8A6;
+  }
+
+  /* Hover states on dark surfaces */
+  html.dark .hover\:bg-\[\#FAFAF9\]:hover,
+  html.dark .hover\:bg-slate-50:hover,
+  html.dark .hover\:bg-slate-100:hover,
+  html.dark .hover\:bg-slate-100\/70:hover,
+  html.dark .hover\:bg-slate-200:hover,
+  html.dark .hover\:bg-\[\#E7E5E4\]:hover,
+  html.dark .hover\:bg-\[\#E7E5E4\]\/60:hover {
+    background-color: #36312E;
+  }
+
+  /* Borders & Dividers (>= 3:1 contrast) */
+  html.dark .border-\[\#E7E5E4\],
+  html.dark .border-slate-100,
+  html.dark .border-slate-200,
+  html.dark .border-slate-200\/70,
+  html.dark .border-slate-200\/90,
+  html.dark .divide-\[\#E7E5E4\] > :not(:last-child) {
+    border-color: #3F3A36;
+  }
+
+  html.dark .border-\[\#D6D3D1\],
+  html.dark .border-slate-300,
+  html.dark .hover\:border-slate-300:hover {
+    border-color: #57534E;
+  }
+
+  /* Primary & Secondary Typography (>= 4.5:1 AA) */
+  html.dark .text-\[\#1C1917\],
+  html.dark .text-slate-900,
+  html.dark .text-slate-800 {
+    color: #FAF9F7;
+  }
+
+  html.dark .text-\[\#57534E\],
+  html.dark .text-slate-700,
+  html.dark .text-slate-600 {
+    color: #D6D3D1;
+  }
+
+  html.dark .text-slate-500,
+  html.dark .text-slate-400 {
+    color: #A8A29E;
+  }
+
+  html.dark .text-slate-300 {
+    color: #78716C;
+  }
+
+  html.dark input::placeholder,
+  html.dark textarea::placeholder {
+    color: #A8A29E;
+  }
+
+  /* Brand Teal Soft Surfaces */
+  html.dark .bg-\[\#CCFBF1\],
+  html.dark .bg-\[\#CCFBF1\]\/70,
+  html.dark .bg-\[\#99F6E4\] {
+    background-color: #134E4A;
+  }
+  html.dark .hover\:bg-\[\#CCFBF1\]:hover,
+  html.dark .hover\:bg-\[\#99F6E4\]:hover {
+    background-color: #115E59;
+  }
+  html.dark .text-\[\#0F766E\],
+  html.dark .text-\[\#115E59\] {
+    color: #5EEAD4;
+  }
+
+  /* AI Violet Soft Surfaces */
+  html.dark .bg-\[\#EDE9FE\] {
+    background-color: #2E1065;
+  }
+  html.dark .text-\[\#6D28D9\],
+  html.dark .text-\[\#5B21B6\],
+  html.dark .text-\[\#8B5CF6\] {
+    color: #DDD6FE;
+  }
+
+  /* Rose Conflict & Off-Day Surfaces */
+  html.dark .bg-\[\#FFF1F2\],
+  html.dark .bg-rose-50,
+  html.dark .bg-rose-50\/80,
+  html.dark .bg-rose-50\/90,
+  html.dark .bg-rose-100 {
+    background-color: #4C0519;
+  }
+  html.dark .hover\:bg-rose-100:hover {
+    background-color: #881337;
+  }
+  html.dark .border-rose-200,
+  html.dark .border-rose-200\/90 {
+    border-color: #9F1239;
+  }
+  html.dark .text-\[\#BE123C\],
+  html.dark .text-rose-600,
+  html.dark .text-rose-700,
+  html.dark .text-rose-800 {
+    color: #FECDD3;
+  }
+
+  /* Amber Surfaces */
+  html.dark .bg-amber-50,
+  html.dark .bg-amber-50\/60,
+  html.dark .bg-amber-100 {
+    background-color: #451A03;
+  }
+  html.dark .hover\:bg-amber-100:hover {
+    background-color: #78350F;
+  }
+  html.dark .border-amber-200,
+  html.dark .border-amber-300 {
+    border-color: #92400E;
+  }
+  html.dark .text-amber-800,
+  html.dark .text-amber-900,
+  html.dark .text-amber-900\/90,
+  html.dark .text-amber-950 {
+    color: #FDE68A;
+  }
+
+  /* Emerald Surfaces */
+  html.dark .bg-emerald-50,
+  html.dark .bg-emerald-50\/40,
+  html.dark .bg-emerald-100 {
+    background-color: #022C22;
+  }
+  html.dark .hover\:bg-emerald-100:hover {
+    background-color: #064E3B;
+  }
+  html.dark .border-emerald-200 {
+    border-color: #065F46;
+  }
+  html.dark .text-emerald-600,
+  html.dark .text-emerald-800,
+  html.dark .text-emerald-950 {
+    color: #A7F3D0;
+  }
+
+  /* Blue Surfaces */
+  html.dark .bg-blue-50,
+  html.dark .bg-blue-50\/50,
+  html.dark .bg-blue-50\/70,
+  html.dark .bg-blue-100 {
+    background-color: #172554;
+  }
+  html.dark .hover\:bg-blue-100:hover {
+    background-color: #1E3A8A;
+  }
+  html.dark .border-blue-200 {
+    border-color: #1E40AF;
+  }
+  html.dark .text-blue-600,
+  html.dark .text-blue-700,
+  html.dark .text-blue-800,
+  html.dark .text-blue-900,
+  html.dark .text-blue-950 {
+    color: #BFDBFE;
+  }
+
+  /* Indigo Surfaces */
+  html.dark .bg-indigo-50,
+  html.dark .bg-indigo-100 {
+    background-color: #1E1B4B;
+  }
+  html.dark .hover\:bg-indigo-100:hover {
+    background-color: #312E81;
+  }
+  html.dark .border-indigo-200,
+  html.dark .border-indigo-300 {
+    border-color: #3730A3;
+  }
+  html.dark .text-indigo-700,
+  html.dark .text-indigo-800 {
+    color: #C7D2FE;
+  }
 }
 
 /* Tabular figures for numbers alignment in table headers & cells */

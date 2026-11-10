@@ -123,8 +123,48 @@ export function getSubjectPalette(subjectName: string = ""): CellPalette {
   return { ...RICH_PALETTES[Math.abs(hash) % RICH_PALETTES.length], icon: "📚" };
 }
 
+const DARK_CELL_PALETTES_BY_BG: Record<string, Omit<CellPalette, "icon">> = {
+  "#FEF3C7": { bg: "#3B2306", border: "#D97706", text: "#FDE68A", badgeBg: "#78350F", badgeText: "#FEF3C7" },
+  "#DBEAFE": { bg: "#172554", border: "#3B82F6", text: "#BFDBFE", badgeBg: "#1E3A8A", badgeText: "#DBEAFE" },
+  "#D1FAE5": { bg: "#063626", border: "#10B981", text: "#A7F3D0", badgeBg: "#065F46", badgeText: "#D1FAE5" },
+  "#CCFBF1": { bg: "#0B3534", border: "#14B8A6", text: "#99F6E4", badgeBg: "#115E59", badgeText: "#CCFBF1" },
+  "#FFE4E6": { bg: "#450A1B", border: "#F43F5E", text: "#FECDD3", badgeBg: "#881337", badgeText: "#FFE4E6" },
+  "#EDE9FE": { bg: "#2B1454", border: "#8B5CF6", text: "#DDD6FE", badgeBg: "#4C1D95", badgeText: "#EDE9FE" },
+  "#E0E7FF": { bg: "#1E1B4B", border: "#6366F1", text: "#C7D2FE", badgeBg: "#312E81", badgeText: "#E0E7FF" },
+  "#ECFCCB": { bg: "#1E330B", border: "#84CC16", text: "#D9F99D", badgeBg: "#365314", badgeText: "#ECFCCB" },
+  "#FFEDD5": { bg: "#421A06", border: "#F97316", text: "#FED7AA", badgeBg: "#7C2D12", badgeText: "#FFEDD5" },
+  "#FCE7F3": { bg: "#480B27", border: "#EC4899", text: "#FBCFE8", badgeBg: "#831843", badgeText: "#FCE7F3" },
+  "#F5D0FE": { bg: "#3D0E42", border: "#D946EF", text: "#F5D0FE", badgeBg: "#701A75", badgeText: "#FAE8FF" },
+  "#E0F2FE": { bg: "#0C2D42", border: "#0EA5E9", text: "#BAE6FD", badgeBg: "#075985", badgeText: "#E0F2FE" },
+  "#FFFBEB": { bg: "#3B2306", border: "#F59E0B", text: "#FDE68A", badgeBg: "#78350F", badgeText: "#FEF3C7" },
+  "#F1F5F9": { bg: "#1E293B", border: "#64748B", text: "#E2E8F0", badgeBg: "#334155", badgeText: "#F1F5F9" },
+  "#FEF9C3": { bg: "#3A2B06", border: "#EAB308", text: "#FEF08A", badgeBg: "#713F12", badgeText: "#FEF9C3" },
+  "#DCFCE7": { bg: "#08331B", border: "#22C55E", text: "#BBF7D0", badgeBg: "#14532D", badgeText: "#DCFCE7" },
+};
+
+function adaptCellPalette(pal: CellPalette, isDark: boolean): CellPalette {
+  if (!isDark) return pal;
+  const mapped = DARK_CELL_PALETTES_BY_BG[pal.bg];
+  if (mapped) return { ...mapped, icon: pal.icon };
+  return { bg: "#1E293B", border: "#64748B", text: "#E2E8F0", badgeBg: "#334155", badgeText: "#F1F5F9", icon: pal.icon };
+}
+
 
 export default function App() {
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    try {
+      return localStorage.getItem("JADWAL_THEME") === "dark" ? "dark" : "light";
+    } catch {
+      return "light";
+    }
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    try {
+      localStorage.setItem("JADWAL_THEME", theme);
+    } catch { }
+  }, [theme]);
+
   const [backendUrl] = useState(() => {
     const saved = localStorage.getItem("SCHEDULER_BACKEND_URL");
     return saved === "http://localhost:8000" ? "" : (saved ?? DEFAULT_BACKEND_URL);
@@ -1130,14 +1170,14 @@ export default function App() {
     </span>
   );
   function getSectionPalette(sectionId: string): CellPalette {
-    if (!school) return RICH_PALETTES[0];
+    if (!school) return adaptCellPalette(RICH_PALETTES[0], theme === "dark");
     const idx = school.sections.findIndex((s) => s.id === sectionId);
-    return RICH_PALETTES[(idx >= 0 ? idx : 0) % RICH_PALETTES.length];
+    return adaptCellPalette(RICH_PALETTES[(idx >= 0 ? idx : 0) % RICH_PALETTES.length], theme === "dark");
   }
 
   function getCellPalette(entry: TimetableEntry): CellPalette {
     if (colorMode === "subject") {
-      return getSubjectPalette(getSubjectName(entry.subject_id));
+      return adaptCellPalette(getSubjectPalette(getSubjectName(entry.subject_id)), theme === "dark");
     }
     return getSectionPalette(entry.section_id);
   }
@@ -1421,12 +1461,30 @@ export default function App() {
               </span>
             </div>
 
-            {/* Mobile Menu Toggle */}
+            {/* Mobile Theme Switch & Menu Toggle */}
             <div className="flex items-center gap-1.5 sm:hidden shrink-0">
               <button
                 type="button"
+                onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+                aria-label={theme === "dark" ? "التبديل إلى الوضع الفاتح" : "التبديل إلى الوضع الداكن"}
+                title={theme === "dark" ? "التبديل إلى الوضع الفاتح" : "التبديل إلى الوضع الداكن"}
+                className="min-h-[34px] min-w-[34px] bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] px-2 py-1.5 rounded-xl border border-[#E7E5E4] flex items-center justify-center transition cursor-pointer"
+              >
+                {theme === "dark" ? (
+                  <svg className="w-4 h-4 text-[#FBBF24]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
+                    <circle cx="12" cy="12" r="4" />
+                    <path strokeLinecap="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4 text-[#57534E]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => setMobileHeaderMenuOpen(!mobileHeaderMenuOpen)}
-                className="bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[#E7E5E4] transition cursor-pointer"
+                className="min-h-[34px] bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[#E7E5E4] transition cursor-pointer"
                 title="خيارات المدرسة والمفاتيح"
               >
                 {mobileHeaderMenuOpen ? "✕" : "القائمة"}
@@ -1611,6 +1669,41 @@ export default function App() {
               </svg>
               <span>تواصل</span>
             </a>
+
+            {/* Dual Light / Dark Theme Segmented Switch */}
+            <div className="hidden sm:inline-flex items-center bg-[#FAFAF9] border border-[#E7E5E4] rounded-xl p-0.5 shrink-0" role="group" aria-label="اختيار مظهر الواجهة">
+              <button
+                type="button"
+                onClick={() => setTheme("light")}
+                aria-pressed={theme === "light"}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 transition cursor-pointer ${theme === "light"
+                  ? "bg-white text-[#1C1917] shadow-2xs border border-[#E7E5E4]"
+                  : "text-[#57534E] hover:text-[#1C1917]"
+                  }`}
+                title="الوضع الفاتح (وايت)"
+              >
+                <svg className="w-3.5 h-3.5 text-[#D97706] shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
+                  <circle cx="12" cy="12" r="4" />
+                  <path strokeLinecap="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
+                </svg>
+                <span>فاتح</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTheme("dark")}
+                aria-pressed={theme === "dark"}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 transition cursor-pointer ${theme === "dark"
+                  ? "bg-[#292524] text-[#FAF9F7] shadow-2xs border border-[#57534E]"
+                  : "text-[#57534E] hover:text-[#1C1917]"
+                  }`}
+                title="الوضع الداكن (دارك)"
+              >
+                <svg className="w-3.5 h-3.5 text-[#A78BFA] shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" />
+                </svg>
+                <span>داكن</span>
+              </button>
+            </div>
 
             {/* AI Keys Pill */}
             <button
@@ -2788,10 +2881,10 @@ export default function App() {
                                 : "hover:brightness-95"
                           }`}
                         style={{
-                          backgroundColor: isChangedCell ? "#EDE9FE" : pal.bg,
+                          backgroundColor: isChangedCell ? (theme === "dark" ? "#2E1065" : "#EDE9FE") : pal.bg,
                           borderColor: entry.is_pinned ? "#0F766E" : isChangedCell ? "#8B5CF6" : isSelectedForSwap ? "#0F766E" : pal.border,
                           borderWidth: entry.is_pinned ? "2px" : "1px",
-                          color: isChangedCell ? "#6D28D9" : pal.text,
+                          color: isChangedCell ? (theme === "dark" ? "#DDD6FE" : "#6D28D9") : pal.text,
                         }}
                         title={hoverTooltip}
                       >
@@ -2822,9 +2915,9 @@ export default function App() {
                               : "hover:scale-[1.01]"
                         } ${densityConfig.cellPadding}`}
                       style={{
-                        backgroundColor: isChangedCell ? "#EDE9FE" : pal.bg,
+                        backgroundColor: isChangedCell ? (theme === "dark" ? "#2E1065" : "#EDE9FE") : pal.bg,
                         borderColor: isChangedCell ? "#8B5CF6" : isSelectedForSwap ? "#0F766E" : pal.border,
-                        color: isChangedCell ? "#6D28D9" : pal.text,
+                        color: isChangedCell ? (theme === "dark" ? "#DDD6FE" : "#6D28D9") : pal.text,
                       }}
                       title={hoverTooltip}
                     >
@@ -3280,7 +3373,7 @@ export default function App() {
                                   </div>
                                   <div className="flex flex-wrap items-center gap-2">
                                     {summaryList.map((item) => {
-                                      const pal = getSubjectPalette(item.subName);
+                                      const pal = adaptCellPalette(getSubjectPalette(item.subName), theme === "dark");
                                       return (
                                         <span
                                           key={item.subId}
@@ -3506,7 +3599,7 @@ export default function App() {
             onClick={() => setIsMobileSheetOpen(true)}
             aria-label="وكيل الجداول الذكي (طلب تعديل بالعامية)"
             title="وكيل الجداول الذكي (طلب تعديل بالعامية)"
-            className="group min-h-[46px] h-12 ps-2 pe-3.5 rounded-full bg-[#1C1917] hover:bg-[#292524] active:scale-95 text-white border border-white/15 shadow-[0_12px_28px_-6px_rgba(28,25,23,0.45),0_4px_12px_rgba(15,118,110,0.28)] flex items-center gap-2.5 transition-all duration-200 cursor-pointer"
+            className="group min-h-[46px] h-12 ps-2 pe-3.5 rounded-full bg-[#1C1917] hover:bg-[#292524] active:scale-95 text-white border border-white/15 dark:border-[#14B8A6]/45 shadow-[0_12px_28px_-6px_rgba(28,25,23,0.45),0_4px_12px_rgba(15,118,110,0.28)] dark:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.8),0_0_0_1px_rgba(20,184,166,0.25)] flex items-center gap-2.5 transition-all duration-200 cursor-pointer"
           >
             <span className="relative w-8 h-8 rounded-full bg-gradient-to-br from-[#0F766E] via-[#0D9488] to-[#6D28D9] flex items-center justify-center shrink-0 ring-1 ring-white/25" aria-hidden="true">
               <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
