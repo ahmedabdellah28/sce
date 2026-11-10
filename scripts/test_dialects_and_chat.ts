@@ -1,4 +1,10 @@
-import { interpretCommand, applyOps, schoolToMarkdown } from "../services/schoolCore.ts";
+import {
+  interpretCommand,
+  applyOps,
+  schoolToMarkdown,
+  isQuestionOrInquiry,
+  answerSchoolQuestion,
+} from "../services/schoolCore.ts";
 import { InBrowserSchoolEngine } from "../services/localEngine.ts";
 import type { SchoolData } from "../types.ts";
 
@@ -324,6 +330,140 @@ async function runTests() {
     assert(newT?.work_pattern?.target_working_days === 1, "17.e تم ضبط أيام العمل المستهدفة كيوم واحد (الخميس)");
   }
 
+  // Test 18: Conversational Greetings & Persona Help
+  {
+    const q = "السلام عليكم ورحمة الله وبركاته، مين أنت وبتقدر تعمل إيه؟";
+    assert(isQuestionOrInquiry(q), "18.a التعرف على التحية وسؤال الهوية كاستفسار شات");
+    const ans = answerSchoolQuestion(q, baseSchool);
+    assert(ans.answered, "18.b تقديم إجابة تفاعلية ترحيبية من وكيل الجداول الذكي");
+    assert(ans.reply.includes("مدرسة الاختبار التجريبية"), "18.c الإجابة تتضمن اسم المدرسة الصحيح");
+    assert(ans.reply.includes("المعلمين"), "18.d الإجابة توضح إمكانيات المساعد والاطلاع على المعلمين");
+  }
+
+  // Test 19: Teacher Off-Days Question in Egyptian Slang "مين واخد إجازة يوم الأحد؟"
+  {
+    // First, give Kamal Tuesday off and Mahmoud Sunday off
+    const schoolWithOffs = applyOps(baseSchool, [
+      { op: "set_teacher_days", teacher: "محمود حسن", off_days: [0] },
+      { op: "set_teacher_days", teacher: "كمال", off_days: [2] },
+    ]).school;
+
+    const qSunday = "مين واخد إجازة يوم الأحد؟";
+    assert(isQuestionOrInquiry(qSunday), "19.a التعرف على سؤال الإجازات كاستفسار وليس أمر تعديل");
+    const ansSunday = answerSchoolQuestion(qSunday, schoolWithOffs);
+    assert(ansSunday.answered, "19.b الإجابة على استفسار إجازة يوم الأحد");
+    assert(ansSunday.reply.includes("محمود حسن"), "19.c التعرف على أن الأستاذ محمود حسن لديه إجازة الأحد");
+    assert(!ansSunday.reply.includes("كمال:"), "19.d التأكد من أن كمال ليس لديه إجازة الأحد");
+
+    const qTuesday = "مين عنده أوف التلات؟";
+    const ansTuesday = answerSchoolQuestion(qTuesday, schoolWithOffs);
+    assert(ansTuesday.answered && ansTuesday.reply.includes("كمال"), "19.e فهم استفسار 'أوف التلات' بالعامية وإرجاع الأستاذ كمال");
+  }
+
+  // Test 20: Teacher Workload Inquiry "كمال بياخد كام حصة في الأسبوع؟"
+  {
+    const qWorkload = "كمال بياخد كام حصة في الأسبوع؟";
+    assert(isQuestionOrInquiry(qWorkload), "20.a التعرف على سؤال نصيب الحصص بالعامية");
+    const ans = answerSchoolQuestion(qWorkload, baseSchool);
+    assert(ans.answered, "20.b تمت الإجابة على استفسار النصيب");
+    assert(ans.reply.includes("6 حصة") || ans.reply.includes("6"), "20.c استخراج النصيب الدقيق للأستاذ كمال (6 حصص)");
+    assert(ans.reply.includes("1/1"), "20.d توضيح الفصل المسند للأستاذ كمال (فصل 1/1)");
+  }
+
+  // Test 21: Highest & Lowest Workload Ranking
+  {
+    const qRank = "مين أكتر معلم عنده حصص في المدرسة؟";
+    assert(isQuestionOrInquiry(qRank), "21.a التعرف على سؤال المقارنة والترتيب");
+    const ans = answerSchoolQuestion(qRank, baseSchool);
+    assert(ans.answered, "21.b الإجابة على سؤال الأعلى نصيباً");
+    assert(ans.reply.includes("كمال"), "21.c تحديد المعلم الأعلى نصيباً بدقة");
+  }
+
+  // Test 22: Timetable Audit & Health Check "هل الجدول فيه أي تعارضات؟"
+  {
+    const solved = InBrowserSchoolEngine.solveInBrowser(baseSchool);
+    const qAudit = "هل الجدول فيه أي تعارضات أو مشاكل؟";
+    assert(isQuestionOrInquiry(qAudit), "22.a التعرف على طلب فحص الجدول");
+    const ans = answerSchoolQuestion(qAudit, baseSchool, solved.schedule);
+    assert(ans.answered, "22.b الإجابة بتقرير فحص شامل");
+    assert(ans.reply.includes("0 تعارض") || ans.reply.includes("سليم"), "22.c تأكيد 0% تعارضات في التقرير");
+    assert(ans.reply.includes(String(solved.schedule.quality_score)), "22.d ذكر نسبة جودة الجدول الفعلية");
+  }
+
+  // Test 23: Section Teachers Inquiry "مين بيدرس لفصل 1/1؟"
+  {
+    const qSec = "مين بيدرس لفصل 1/1؟";
+    assert(isQuestionOrInquiry(qSec), "23.a التعرف على استفسار مدرسي الفصل");
+    const ans = answerSchoolQuestion(qSec, baseSchool);
+    assert(ans.answered, "23.b الإجابة على استفسار مدرسي فصل 1/1");
+    assert(ans.reply.includes("كمال") && ans.reply.includes("محمود حسن"), "23.c سرد معلمي الفصل بالكامل (كمال ومحمود)");
+  }
+
+  // Test 24: Subject Specialists Inquiry "مين بيدرس رياضيات في المدرسة؟"
+  {
+    const qSub = "مين بيدرس رياضيات في المدرسة؟";
+    const ans = answerSchoolQuestion(qSub, baseSchool);
+    assert(ans.answered, "24.a الإجابة على استفسار معلمي المادة");
+    assert(ans.reply.includes("يوسف كمال"), "24.b تحديد أن يوسف كمال هو مدرس الرياضيات");
+  }
+
+  // Test 25: Teacher Day Schedule Lookup
+  {
+    const solved = InBrowserSchoolEngine.solveInBrowser(baseSchool);
+    const qSched = "ما هو جدول الأستاذ كمال يوم الأحد؟";
+    const ans = answerSchoolQuestion(qSched, baseSchool, solved.schedule);
+    assert(ans.answered, "25.a الإجابة على استعلام جدول حصص اليوم المحدد");
+    assert(ans.reply.includes("الأستاذ كمال") && ans.reply.includes("الأحد"), "25.b تفصيل جدول الحصص للأستاذ كمال");
+  }
+
+  // Test 26: Teacher-Centric Addition & Multi-Section Assignment via Chat
+  {
+    const cmd = "ضيف أستاذ حسام مدرس لغة عربية لفصل 1/1 و 1/2 بواقع 6 حصص لكل فصل";
+    const res = interpretCommand(cmd, baseSchool);
+    assert(res.understood, "26.a فهم أمر إضافة معلم وإسناد حصصه لفصول متعددة تلقائياً");
+    assert(
+      res.ops.some((o) => o.op === "add_teacher" && o.name.includes("حسام")),
+      "26.b توليد عملية add_teacher للأستاذ حسام"
+    );
+    const assignOps = res.ops.filter((o) => o.op === "set_assignment");
+    assert(assignOps.length === 2, "26.c توليد عمليتي إسناد لفصلي 1/1 و 1/2", assignOps);
+    assert(
+      assignOps.every((o) => o.periods === 6),
+      "26.d ضبط عدد الحصص على 6 حصص لكل فصل"
+    );
+
+    const applied = applyOps(baseSchool, res.ops);
+    const newT = applied.school.teachers.find((t) => t.name === "حسام");
+    assert(Boolean(newT), "26.e نجاح إضافة الأستاذ حسام لقائمة المعلمين");
+    const newAsgs = applied.school.assignments.filter((a) => a.teacher_id === newT?.id);
+    assert(newAsgs.length === 2, "26.f ربط تكليفي الفصلين بالأستاذ حسام");
+  }
+
+  // Test 27: Teacher-Centric Assignment to Existing Teacher
+  {
+    const cmd = "اسند لمستر يوسف مادة الرياضيات لفصول 1/1 و 1/2 4 حصص";
+    const res = interpretCommand(cmd, baseSchool);
+    assert(res.understood, "27.a فهم إسناد مادة الرياضيات للأستاذ يوسف عبر فصول متعددة");
+    const assignOps = res.ops.filter((o) => o.op === "set_assignment");
+    assert(assignOps.length >= 2, "27.b استخراج فصلي 1/1 و 1/2 للإسناد", assignOps);
+    assert(
+      assignOps.some((o) => o.periods === 4 && o.subject.includes("الرياضيات")),
+      "27.c ضبط 4 حصص رياضيات للأستاذ يوسف"
+    );
+  }
+
+  // Test 28: Teacher-Centric Deletion / Unassignment via Chat
+  {
+    const cmd = "احذف مادة العربي من أستاذ كمال";
+    const res = interpretCommand(cmd, baseSchool);
+    assert(res.understood, "28.a فهم أمر حذف مادة/تكليف العربي من أستاذ كمال");
+    const zeroOps = res.ops.filter((o) => o.op === "set_assignment" && o.periods === 0);
+    assert(zeroOps.length > 0, "28.b توليد عملية تصفير تكليفات العربي للأستاذ كمال", res.ops);
+    const applied = applyOps(baseSchool, res.ops);
+    const kamalAsgs = applied.school.assignments.filter((a) => a.teacher_id === "TCH_1");
+    assert(kamalAsgs.length === 0, "28.c حذف تكليف العربي فعلياً من المدرسة");
+  }
+
   console.log(`\n========================================`);
   console.log(`النتائج النهائية: ${passed} نجح | ${failed} فشل`);
   console.log(`========================================\n`);
@@ -335,3 +475,4 @@ runTests().catch((err) => {
   console.error("Test execution failed:", err);
   process.exit(1);
 });
+

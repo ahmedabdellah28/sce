@@ -22,13 +22,13 @@ export default function TimetableDiffPreview({
           <span className="text-xl">🔍</span>
           <div>
             <h3 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
-              معاينة التعديلات المقترحة بأقل تغيير (Dry-run Diff)
+              معاينة التعديلات
               <span className="text-[10px] bg-blue-100 text-blue-900 px-2 py-0.5 rounded-full font-bold">
-                تثبيت الحصص السليمة
+                تثبيت السليم
               </span>
             </h3>
             <p className="text-[11px] text-slate-500">
-              تم احتساب التعديلات بتجربة جافة على نسخة مؤقتة مع الحفاظ على {diff.unchanged_count} حصة ثابتة
+              تغييرات مقترحة مع الحفاظ على {diff.unchanged_count} حصة ثابتة
             </p>
           </div>
         </div>
@@ -37,18 +37,18 @@ export default function TimetableDiffPreview({
           <button
             type="button"
             onClick={onDiscard}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs px-3 py-1.5 rounded-xl transition"
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer"
           >
-            ↩️ تراجع وإلغاء
+            إلغاء
           </button>
 
           <button
             type="button"
             onClick={onApply}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs px-4 py-1.5 rounded-xl shadow-xs transition flex items-center gap-1.5"
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs px-4 py-1.5 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
           >
             <span>✅</span>
-            <span>تطبيق التعديلات الآن</span>
+            <span>تطبيق التعديلات</span>
           </button>
         </div>
       </div>

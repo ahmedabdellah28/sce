@@ -2204,6 +2204,187 @@ export interface InterpretResult {
   hints: string[];
 }
 
+/**
+ * Advanced Teacher-Centric Multi-Assignment & Creation Parser.
+ * Handles natural language instructions like:
+ * - "ضيف أستاذ محمود مدرس لغة عربية لفصل 1/1 و 1/2 بواقع 6 حصص لكل فصل"
+ * - "اسند لمستر أحمد مادة الرياضيات لفصول 1/1 و 1/2 4 حصص"
+ * - "خلي عصام يدرس علوم لفصل 2/1 5 حصص"
+ * - "احذف مادة العربي من أستاذ كمال"
+ */
+export function parseTeacherCentricAssignment(
+  school: SchoolData,
+  message: string,
+  extractedCodes: string[] = [],
+  knownTeacherRef?: string
+): Op[] | null {
+  const n = normAr(message);
+
+  // Check if intent is teacher assignment / unassignment / addition with subjects
+  const isAssignmentIntent =
+    /(اسند|سند|عين|خلي|اجعل|ضيف|اضف|سجل|يدرس|تدرس|مدرس|معلم|استاذ|تكليف|تكليفات|احذف|شيل|امسح)/.test(n) &&
+    /(مادة|ماده|لمادة|لماده|يدرس|تدرس|مدرس|معلم|حصص|حصة|حصه|عرب|رياض|علوم|دراس|انجليز|دين|حاسب|رسم|فصل|فصول)/.test(n);
+
+  if (!isAssignmentIntent) return null;
+
+  // 1. Resolve Teacher
+  let teacherName = knownTeacherRef;
+  if (!teacherName) {
+    const tm = resolveTeacherFromMessage(school, message);
+    if (tm.teacher) {
+      teacherName = tm.teacher.name;
+    }
+  }
+
+  // If still not resolved, attempt to extract teacher candidate from phrases like:
+  // "ضيف أستاذ محمود مدرس..." or "سجل معلم جديد اسمه سامح يدرس..."
+  if (!teacherName) {
+    const newTMatch = message.match(
+      /(?:اضف|اضافه|ضيف|سجل|خلي|اسند|عين)\s+(?:ال)?(?:مدرس|معلم|مدرسه|معلمه|[أإآا]?ستاذ|[أإآا]?ستاذه|مستر|أ\.)?\s*(?:جديد\s+|جديدة\s+)?(?:اسمه|اسمها)?\s*([^\n,،\d]+?)(?:\s+(?:مدرس|معلم|[أإآا]?ستاذ|يدرس|تدرس|لمادة|لماده|مادة|ماده|في|بواقع|لفصل|لفصول))/
+    );
+    if (newTMatch) {
+      let cand = newTMatch[1].trim();
+      cand = cand.replace(/^(اسمه|اسمها)\s+/, "").replace(/\s+(?:جديد|جديده)$/, "").trim();
+      cand = cand.replace(/^(?:ال)?(?:[أإآا]?ستاذ|[أإآا]?ستاذه|معلم|معلمه|مدرس|مدرسه|مستر|أ\.)\s+/, "").trim();
+      if (cand && cand.length >= 2 && !/(المدرسة|الجدول|الفصل|المادة|حصة|حصص)/.test(normAr(cand))) {
+        teacherName = cand;
+      }
+    }
+
+  }
+
+  // 2. Resolve Subject
+  const subjObj = findSubjectInMessage(school, message);
+  let subjectName = subjObj?.name;
+  if (!subjectName) {
+    if (/عرب|قرائ|نصوص|لغه عربيه|لغة عربية/.test(n)) subjectName = "اللغة العربية";
+    else if (/رياض|حساب|جبر|هندس|math/.test(n)) subjectName = "الرياضيات";
+    else if (/علوم|ساينس|science/.test(n)) subjectName = "العلوم";
+    else if (/دراسات|جغرافي|تاريخ/.test(n)) subjectName = "الدراسات الاجتماعية";
+    else if (/انجليز|انكليز|english/.test(n)) subjectName = "اللغة الإنجليزية";
+    else if (/دين|اسلام|تربيه دينيه|تربية دينية/.test(n)) subjectName = "التربية الدينية";
+    else if (/حاسب|كمبيوتر|تكنولوجي/.test(n)) subjectName = "الحاسب الآلي";
+    else if (/رسم|فنيه|فنية/.test(n)) subjectName = "التربية الفنية";
+    else if (/رياضه|بدنيه|العاب|رياضية/.test(n)) subjectName = "التربية الرياضية";
+    else {
+      const subMatch = message.match(
+        /(?:مادة|ماده|لمادة|لماده|يدرس|تدرس|مدرس|معلم)\s+([^\n,،\d]+?)(?:\s+(?:لفصل|لفصول|بواقع|بعدد|عدد|\d+)|$)/
+      );
+      if (subMatch) {
+        const candidate = subMatch[1].trim();
+        if (!/(جديد|جديده|استاذ|معلم|مدرس)/.test(normAr(candidate)) && candidate.length >= 2) {
+          subjectName = candidate;
+        }
+      }
+    }
+  }
+
+  // Map to exact existing school subject name if available
+  if (subjectName) {
+    const existingSub = school.subjects.find((s) => normAr(s.name) === normAr(subjectName!));
+    if (existingSub) subjectName = existingSub.name;
+  }
+
+  if (!teacherName && !subjectName) return null;
+
+  // 3. Deletion / unassignment intent: e.g. "احذف مادة العربي من أستاذ كمال"
+  const isDeleteIntent =
+    /(احذف|شيل|امسح|الغ).*(مادة|ماده|تكليف|حصص)/.test(n) || /(مادة|ماده).*(احذف|شيل|امسح)/.test(n);
+  if (isDeleteIntent && teacherName && subjectName) {
+    const tch = school.teachers.find((t) => normAr(t.name) === normAr(teacherName!));
+    if (tch) {
+      const matchingSub = school.subjects.find((s) => normAr(s.name) === normAr(subjectName!));
+      if (matchingSub) {
+        const targetAsgs = school.assignments.filter(
+          (a) => a.teacher_id === tch.id && a.subject_id === matchingSub.id
+        );
+        if (targetAsgs.length > 0) {
+          return targetAsgs.map((a) => {
+            const sec = school.sections.find((s) => s.id === a.section_id);
+            return {
+              op: "set_assignment" as const,
+              section: sec?.name || a.section_id,
+              subject: matchingSub.name,
+              teacher: tch.name,
+              periods: 0,
+            };
+          });
+        }
+      }
+    }
+  }
+
+  // 4. Resolve Sections
+  let resolvedSections: string[] = [...extractedCodes];
+  if (resolvedSections.length === 0) {
+    if (/(لفصول|فصول|شعب)\s+(الصف\s+)?(الاول|الأول|اولى|أولى|1)/.test(n)) {
+      resolvedSections = school.sections
+        .filter((s) => s.name.startsWith("1/") || s.code.startsWith("1-") || s.grade_id.includes("1"))
+        .map((s) => s.name);
+    } else if (/(لفصول|فصول|شعب)\s+(الصف\s+)?(الثاني|تانية|تانيه|2)/.test(n)) {
+      resolvedSections = school.sections
+        .filter((s) => s.name.startsWith("2/") || s.code.startsWith("2-") || s.grade_id.includes("2"))
+        .map((s) => s.name);
+    } else if (/(لفصول|فصول|شعب)\s+(الصف\s+)?(الثالث|تالتة|تالته|3)/.test(n)) {
+      resolvedSections = school.sections
+        .filter((s) => s.name.startsWith("3/") || s.code.startsWith("3-") || s.grade_id.includes("3"))
+        .map((s) => s.name);
+    }
+  }
+
+  // 5. Resolve Periods
+  let periods: number | null = null;
+  const periodMatch = message.match(/(\d+)\s*(?:حصة|حصص|حصه)/);
+  if (periodMatch) {
+    periods = Number(periodMatch[1]);
+  } else {
+    for (const tok of n.split(/\s+/)) {
+      const v = numberFromWord(tok);
+      if (v !== null && v > 0) {
+        periods = v;
+        break;
+      }
+    }
+  }
+
+  if (periods === null && subjectName) {
+    const existingAsg = school.assignments.find((a) => {
+      const sub = school.subjects.find((s) => s.id === a.subject_id);
+      return sub && normAr(sub.name) === normAr(subjectName!);
+    });
+    if (existingAsg) {
+      periods = existingAsg.weekly_periods;
+    } else {
+      periods = normAr(subjectName).includes("عرب")
+        ? 6
+        : normAr(subjectName).includes("رياض")
+        ? 5
+        : 4;
+    }
+  }
+
+  // If teacher, subject, and at least one section are present:
+  if (teacherName && subjectName && resolvedSections.length > 0 && periods !== null && periods > 0) {
+    const ops: Op[] = [];
+    const teacherExists = school.teachers.some((t) => normAr(t.name) === normAr(teacherName!));
+    if (!teacherExists) {
+      ops.push({ op: "add_teacher", name: teacherName, subject: subjectName });
+    }
+    for (const sec of resolvedSections) {
+      ops.push({
+        op: "set_assignment",
+        section: sec,
+        subject: subjectName,
+        teacher: teacherName,
+        periods: periods,
+      });
+    }
+    return ops;
+  }
+
+  return null;
+}
+
 export function interpretCommand(
   message: string,
   school: SchoolData,
@@ -2371,6 +2552,13 @@ export function interpretCommand(
   const tm = resolveTeacherFromMessage(school, message);
   if (tm.teacher) teacherRef = tm.teacher.name;
   else if (tm.error) hints.push(tm.error);
+
+  // Teacher-Centric Multi-Assignment & Creation (إسناد المعلم وحصصه وفصوله تلقائياً)
+  const teacherCentricOps = parseTeacherCentricAssignment(school, message, codes, teacherRef);
+  if (teacherCentricOps && teacherCentricOps.length > 0) {
+    return { ops: teacherCentricOps, understood: true, hints };
+  }
+
 
   // ---- section (add / remove) ----
   if (/(اضف|اضافه|انشئ|اعمل).*(فصل)/.test(n) && codes.length > 0) {
@@ -2673,7 +2861,7 @@ export function findTeachersInMessage(school: SchoolData, message: string): Teac
   return list.map((x) => x.teacher);
 }
 
-function resolveTeacherFromMessage(school: SchoolData, message: string): { teacher?: Teacher; error?: string } {
+export function resolveTeacherFromMessage(school: SchoolData, message: string): { teacher?: Teacher; error?: string } {
   const mt = messageTokens(message);
   const hits: Array<{ t: Teacher; score: number }> = [];
   for (const t of school.teachers) {
@@ -2702,7 +2890,7 @@ function resolveTeacherFromMessage(school: SchoolData, message: string): { teach
   return { teacher: hits[0].t };
 }
 
-function findSubjectInMessage(school: SchoolData, message: string): Subject | null {
+export function findSubjectInMessage(school: SchoolData, message: string): Subject | null {
   const n = normAr(message).replace(/\d+\s*[\/\\]\s*\d+/g, " ");
   for (const s of school.subjects) {
     const sn = normAr(s.name);
@@ -2715,4 +2903,7 @@ function findSubjectInMessage(school: SchoolData, message: string): Subject | nu
   }
   return null;
 }
+
+export { isQuestionOrInquiry, answerSchoolQuestion } from "./schoolAssistant.ts";
+export type { AssistantAnswer } from "./schoolAssistant.ts";
 

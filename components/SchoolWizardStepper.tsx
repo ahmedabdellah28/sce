@@ -464,30 +464,27 @@ export default function SchoolWizardStepper({
             <span className="text-2xl">🧙‍♂️</span>
             <div>
               <h1 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
-                معالج إعداد وتعديل المدرسة (6 خطوات)
-                <span className="text-[10px] bg-blue-600/60 text-blue-200 border border-blue-400/30 px-2 py-0.5 rounded-full font-bold">
-                  قابلة للتنقل في أي وقت
-                </span>
+                معالج المدرسة (6 خطوات)
               </h1>
-              <p className="text-xs text-slate-400 mt-0.5">
-                تعديل المرحلة، المواد، الفصول، المعلمين، الإسناد، والتحقق الرياضي التام
+              <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
+                تعديل المراحل والمواد والفصول والمعلمين والإسناد
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-700/50 px-2.5 py-1 rounded-lg">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-700/50 px-2 py-1 rounded-lg">
               <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>تم الحفظ تلقائياً: {lastSavedTime}</span>
+              <span>حفظ تلقائي: {lastSavedTime}</span>
             </div>
 
             {onCancel && (
               <button
                 type="button"
                 onClick={onCancel}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1 rounded-lg text-xs font-bold transition"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer"
               >
-                إغلاق المعالج ✕
+                إغلاق ✕
               </button>
             )}
           </div>

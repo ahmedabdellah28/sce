@@ -23,6 +23,9 @@ import {
   getPresetById,
   createSchoolFromPreset,
 } from "./presets/commonPresets.ts";
+import { GoogleGenAI } from "@google/genai";
+import { AGENT_SYSTEM_INSTRUCTION } from "./services/geminiService.ts";
+import { isQuestionOrInquiry, answerSchoolQuestion } from "./services/schoolAssistant.ts";
 
 const PORT = 3000;
 const HOST = "0.0.0.0";
@@ -31,14 +34,66 @@ const isProduction = process.env.NODE_ENV === "production";
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-// --- API Endpoints (Deterministic Local Engine — Zero Server-Side API Keys) ---
+const geminiApiKey = process.env.GEMINI_API_KEY;
+
+function sanitizeGeminiModel(m?: string): string {
+  const model = (m || "").trim();
+  // Map outdated, deprecated or unsupported aliases to active supported ones per gemini-api skill
+  if (!model || model === "gemini-flash-lite-latest" || model === "gemini-flash-lite") {
+    return "gemini-3.1-flash-lite";
+  }
+  if (model === "gemini-flash-latest" || model === "gemini-2.5-flash" || model === "gemini-1.5-flash" || model === "gemini-2.0-flash") {
+    return "gemini-3.8-flash";
+  }
+  return model;
+}
+
+const geminiModel = sanitizeGeminiModel(process.env.GEMINI_MODEL);
+const CANDIDATE_GEMINI_MODELS = [
+  geminiModel,
+  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
+].filter((m, i, arr) => arr.indexOf(m) === i);
+
+const genAI = geminiApiKey
+  ? new GoogleGenAI({
+      apiKey: geminiApiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    })
+  : null;
+
+async function generateGeminiContentWithFallback(contents: any) {
+  if (!genAI) throw new Error("No Gemini client configured");
+  let lastError: any = null;
+  for (const m of CANDIDATE_GEMINI_MODELS) {
+    try {
+      const response = await genAI.models.generateContent({
+        model: m,
+        contents,
+      });
+      return { response, usedModel: m };
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Attempt with model '${m}' failed, trying fallback:`, err?.message || err);
+    }
+  }
+  throw lastError;
+}
+
+// --- API Endpoints ---
 
 // 1. Health
 app.get("/api/health", (_req: Request, res: Response) => {
   res.json({
     online: true,
-    engine: "BYOK Gemini (Client-Side) + محرك الاستمثال والقيود المدمج",
-    has_server_gemini_key: false,
+    engine: genAI
+      ? "AI Studio Server-Side Gemini API + محرك الاستمثال المدمج"
+      : "محرك الاستمثال المدمج + دعم مفاتيح BYOK Gemini",
+    has_server_gemini_key: Boolean(genAI),
   });
 });
 
@@ -183,6 +238,46 @@ app.post("/api/ai/parse", async (req: Request, res: Response) => {
     });
   }
 
+  if (genAI) {
+    try {
+      const { response } = await generateGeminiContentWithFallback(
+        `حول نص بيانات المدرسة التالي إلى كائن JSON صالح فقط ومطابق لهيكل SchoolData التالي:
+interface SchoolData {
+  id: string;
+  name: string;
+  academic_year: string;
+  days: number[];
+  periods_per_day: number;
+  grades: Array<{ id: string; name: string; code: string; order: number }>;
+  sections: Array<{ id: string; grade_id: string; name: string; code: string }>;
+  subjects: Array<{ id: string; name: string; code: string }>;
+  teachers: Array<{ id: string; name: string; code: string; max_daily_periods?: number; max_weekly_periods?: number; work_pattern?: any }>;
+  availabilities: Array<{ teacher_id: string; day: number; period: number; is_available: boolean }>;
+  assignments: Array<{ id: string; section_id: string; subject_id: string; teacher_id: string; weekly_periods: number }>;
+}
+أخرج JSON فقط بدون أي علامات markdown:
+${text}`,
+      );
+      const rawTextResponse = response.text || "";
+      const jsonMatch = rawTextResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsedSchool = JSON.parse(jsonMatch[0]);
+        if (parsedSchool?.sections?.length > 0 && parsedSchool?.assignments?.length > 0) {
+          const analysis = InBrowserSchoolEngine.analyzeSchool(parsedSchool);
+          return res.json({
+            school: parsedSchool,
+            normalization_notes: ["تم استخراج بيانات المدرسة باستخدام نموذج الذكاء الاصطناعي (Gemini) بنجاح."],
+            explanation: `تم فهم وتحليل بيانات "${parsedSchool.name}" بواسطة الذكاء الاصطناعي.`,
+            analysis,
+            needs_client_ai: false,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Server-side Gemini parse fallback failed:", e);
+    }
+  }
+
   const school = parsedDirect?.school || getBuiltInSchool376();
   return res.json({
     school,
@@ -219,9 +314,9 @@ app.post("/api/schools/create-template", (req: Request, res: Response) => {
   });
 });
 
-// 4. Deterministic Timetable Command Interpreter
+// 4. Deterministic Timetable Command Interpreter & Conversational Copilot
 app.post("/api/ai/chat", async (req: Request, res: Response) => {
-  const { message, school, markdown, history } = req.body;
+  const { message, school, schedule, markdown, history } = req.body;
   if (!message || !school) {
     return res.status(400).json({ error: "message and school are required" });
   }
@@ -253,60 +348,146 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
     }
   }
 
-  const cmd = interpretCommand(effectiveMessage, school, history);
-  if (cmd.understood) {
-    let updatedSchool = school;
-    let updatedMarkdown = currentMarkdown;
-    let appliedChanges: string[] = [];
-    let shouldSolve = true;
-    let reply = "";
+  // Check if message is a conversational query or audit request
+  const isQuery = isQuestionOrInquiry(effectiveMessage);
 
-    if (cmd.new_school_text) {
-      const parsed = parseSchoolText(cmd.new_school_text);
-      updatedSchool = parsed.school;
-      appliedChanges = [
-        `إنشاء مدرسة جديدة باسم "${updatedSchool.name}" (${updatedSchool.sections.length} فصول، ${updatedSchool.teachers.length} معلماً)`,
-      ];
-      updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
-      reply = `تم استيراد وإنشاء مدرسة "${updatedSchool.name}" بنجاح! تم استخراج وثيقة الـ Markdown وهيكل الفصول والأنصبة، وجاري بناء الجدول تلقائياً بدون تعارضات.`;
-    } else if (cmd.solve_only) {
-      shouldSolve = true;
-      appliedChanges = ["إعادة توزيع وإنشاء الجدول المدرسي بالكامل لضمان 0% تعارضات"];
-      reply = `تم استلام طلبك لإنشاء وتوزيع الجدول المدرسي. جاري حل وتوليد الجدول الآن بأعلى دقة رياضية ومؤشر جودة مرتفع وبدون أي تعارضات.`;
-    } else if (cmd.ops.length > 0) {
-      const resOps = applyOps(school, cmd.ops);
-      updatedSchool = resOps.school;
-      appliedChanges = resOps.changes;
-      updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
-      reply =
-        appliedChanges.length > 0
-          ? `تم تنفيذ التعديل المطلوب بنجاح وتحديث وثيقة المدرسة (.md):\n` +
-            appliedChanges.map((c) => `✓ ${c}`).join("\n") +
-            `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`
-          : `تم استلام طلبك وتحديث بيانات المدرسة وإعادة إنشاء الجدول.`;
+  // If not a query, check if deterministic mutation command interpreter recognizes it
+  if (!isQuery) {
+    const cmd = interpretCommand(effectiveMessage, school, history);
+    if (cmd.understood) {
+      let updatedSchool = school;
+      let updatedMarkdown = currentMarkdown;
+      let appliedChanges: string[] = [];
+      let shouldSolve = true;
+      let reply = "";
+
+      if (cmd.new_school_text) {
+        const parsed = parseSchoolText(cmd.new_school_text);
+        updatedSchool = parsed.school;
+        appliedChanges = [
+          `إنشاء مدرسة جديدة باسم "${updatedSchool.name}" (${updatedSchool.sections.length} فصول، ${updatedSchool.teachers.length} معلماً)`,
+        ];
+        updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
+        reply = `تم استيراد وإنشاء مدرسة "${updatedSchool.name}" بنجاح! تم استخراج وثيقة الـ Markdown وهيكل الفصول والأنصبة، وجاري بناء الجدول تلقائياً بدون تعارضات.`;
+      } else if (cmd.solve_only) {
+        shouldSolve = true;
+        appliedChanges = ["إعادة توزيع وإنشاء الجدول المدرسي بالكامل لضمان 0% تعارضات"];
+        reply = `تم استلام طلبك لإنشاء وتوزيع الجدول المدرسي. جاري حل وتوليد الجدول الآن بأعلى دقة رياضية ومؤشر جودة مرتفع وبدون أي تعارضات.`;
+      } else if (cmd.ops.length > 0) {
+        const resOps = applyOps(school, cmd.ops);
+        updatedSchool = resOps.school;
+        appliedChanges = resOps.changes;
+        updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
+        reply =
+          appliedChanges.length > 0
+            ? `تم تنفيذ التعديل المطلوب بنجاح وتحديث وثيقة المدرسة (.md):\n` +
+              appliedChanges.map((c) => `✓ ${c}`).join("\n") +
+              `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`
+            : `تم استلام طلبك وتحديث بيانات المدرسة وإعادة إنشاء الجدول.`;
+      }
+
+      return res.json({
+        understood: true,
+        reply,
+        updated_markdown: updatedMarkdown,
+        updated_school: updatedSchool,
+        should_solve: shouldSolve,
+        applied_changes: appliedChanges,
+        analysis:
+          updatedSchool?.sections && updatedSchool?.assignments
+            ? InBrowserSchoolEngine.analyzeSchool(updatedSchool)
+            : undefined,
+      });
     }
+  }
 
+  // Conversational response via Server-Side Gemini (when configured)
+  if (genAI) {
+    try {
+      const { response } = await generateGeminiContentWithFallback([
+        {
+          role: "user",
+          parts: [
+            {
+              text: `${AGENT_SYSTEM_INSTRUCTION}
+
+بيانات المدرسة الحالية (SchoolData JSON):
+${JSON.stringify(school, null, 2)}
+
+وثيقة المدرسة الحالية (Markdown):
+${currentMarkdown}
+
+${schedule ? `حالة الجدول الحالي: متولد بنجاح (${schedule.entries.length} حصة مجدولة، مؤشر الجودة: ${schedule.quality_score}%، 0 تعارضات).` : "الجدول لم يتم توليده بعد."}
+
+طلب أو سؤال المستخدم:
+${effectiveMessage}`,
+            },
+          ],
+        },
+      ]);
+      const rawTextResponse = response.text || "";
+      const jsonMatch = rawTextResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.reply) {
+          const isMutation = parsed.should_solve === true && parsed.updated_school;
+          return res.json({
+            understood: true,
+            reply: parsed.reply,
+            updated_markdown: isMutation ? (parsed.updated_markdown || currentMarkdown) : currentMarkdown,
+            updated_school: isMutation ? parsed.updated_school : school,
+            should_solve: Boolean(isMutation),
+            applied_changes: isMutation ? (parsed.applied_changes || ["تعديل بواسطة الذكاء الاصطناعي"]) : [],
+            analysis: InBrowserSchoolEngine.analyzeSchool(isMutation ? parsed.updated_school : school),
+          });
+        }
+      } else if (rawTextResponse.trim()) {
+        return res.json({
+          understood: true,
+          reply: rawTextResponse.trim(),
+          updated_markdown: currentMarkdown,
+          updated_school: school,
+          should_solve: false,
+          applied_changes: [],
+          analysis: InBrowserSchoolEngine.analyzeSchool(school),
+        });
+      }
+    } catch (e) {
+      console.warn("Server-side Gemini chat failed, falling back to local assistant:", e);
+    }
+  }
+
+  // High-intelligence Local School Q&A Assistant (Zero Latency, Full Data Access)
+  const localAns = answerSchoolQuestion(
+    effectiveMessage,
+    school,
+    schedule,
+    InBrowserSchoolEngine.analyzeSchool(school),
+    history
+  );
+
+  if (localAns.answered) {
     return res.json({
       understood: true,
-      reply,
-      updated_markdown: updatedMarkdown,
-      updated_school: updatedSchool,
-      should_solve: shouldSolve,
-      applied_changes: appliedChanges,
-      analysis:
-        updatedSchool?.sections && updatedSchool?.assignments
-          ? InBrowserSchoolEngine.analyzeSchool(updatedSchool)
-          : undefined,
+      reply: localAns.reply,
+      updated_markdown: currentMarkdown,
+      updated_school: school,
+      should_solve: false,
+      applied_changes: [],
+      analysis: InBrowserSchoolEngine.analyzeSchool(school),
     });
   }
 
   return res.json({
-    understood: false,
-    reply: `تم استلام طلبك: "${message}".\nيمكنك طلب إعطاء إجازة لمعلم (مثل: "أعطِ الأستاذ يوسف كمال إجازة يوم الأحد")، أو تثبيت حصص أولى وأخيرة، أو تعديل أنصبة الحصص، أو الضغط على "إنشاء الجدول".`,
+    understood: true,
+    reply:
+      `أهلاً بك! بخصوص استفسارك عن مدرسة "${school.name}":\n` +
+      `المدرسة تضم ${school.sections.length} فصول و${school.teachers.length} معلماً بإجمالي ${school.assignments.reduce((s, a) => s + a.weekly_periods, 0)} حصة أسبوعياً.\n` +
+      `يمكنك سؤالي عن أنصبة أي معلم، أي يوم إجازة، جداول الفصول، أو طلب أي تعديل وسأنفذه فوراً.`,
     updated_markdown: currentMarkdown,
     updated_school: school,
-    should_solve: true,
-    applied_changes: ["تحديث الجدول بناءً على التوجيه الأخير"],
+    should_solve: false,
+    applied_changes: [],
     analysis: InBrowserSchoolEngine.analyzeSchool(school),
   });
 });

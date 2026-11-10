@@ -38,7 +38,7 @@ try {
   }
 } catch {}
 
-if (!_privateSchoolGetter) {
+if (!_privateSchoolGetter && typeof window === "undefined") {
   try {
     const privPath = "../presets/" + "school376.private.ts";
     const mod = await import(/* @vite-ignore */ privPath);

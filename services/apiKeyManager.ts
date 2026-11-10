@@ -14,7 +14,7 @@ import { sanitizeSchool } from "./schoolCore.ts";
 
 export const BYOK_STORAGE_KEY = "AI_STUDIO_BYOK_GEMINI_KEYS_V1";
 export const DEFAULT_COOLDOWN_MS = 60_000;
-export const DEFAULT_GEMINI_MODEL = "gemini-flash-lite-latest";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite";
 
 export type ApiKeyStatus = "untested" | "valid" | "cooldown" | "invalid";
 

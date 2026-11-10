@@ -2,5 +2,43 @@
 
 body {
   font-family: "Cairo", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom sleek scrollbars for wide timetable viewports */
+.timetable-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.timetable-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.timetable-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.timetable-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Tabular figures for numbers alignment in table headers & cells */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Print styling optimization */
+@media print {
+  body {
+    background: #ffffff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
 }
 

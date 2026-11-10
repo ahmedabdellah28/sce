@@ -25,6 +25,7 @@ import {
   type TimetableDiffReport,
 } from "./services/diffEngine.ts";
 import TimetableDiffPreview from "./components/TimetableDiffPreview.tsx";
+import TeacherManagementHub from "./components/TeacherManagementHub.tsx";
 import { DAY_NAMES_AR, type SchoolData, type Schedule, type AnalysisReport, type TimetableEntry } from "./types.ts";
 
 export interface SavedSchoolEntry {
@@ -36,18 +37,79 @@ export interface SavedSchoolEntry {
   analysis?: AnalysisReport | null;
 }
 
-const SECTION_PALETTE = [
-  { bg: "#DBEAFE", border: "#93C5FD", text: "#1E3A8A" },
-  { bg: "#D1FAE5", border: "#6EE7B7", text: "#065F46" },
-  { bg: "#FEF3C7", border: "#FCD34D", text: "#92400E" },
-  { bg: "#EDE9FE", border: "#C4B5FD", text: "#5B21B6" },
-  { bg: "#FFE4E6", border: "#FDA4AF", text: "#9F1239" },
-  { bg: "#E0F2FE", border: "#7DD3FC", text: "#075985" },
-  { bg: "#FCE7F3", border: "#F9A8D4", text: "#831843" },
-  { bg: "#ECFCCB", border: "#BEF264", text: "#3F6212" },
-  { bg: "#FFEDD5", border: "#FDBA74", text: "#9A3412" },
-  { bg: "#F3E8FF", border: "#D8B4FE", text: "#6B21A8" },
+export interface CellPalette {
+  bg: string;
+  border: string;
+  text: string;
+  badgeBg: string;
+  badgeText: string;
+  icon?: string;
+}
+
+const RICH_PALETTES: CellPalette[] = [
+  { bg: "#FEF3C7", border: "#F59E0B", text: "#78350F", badgeBg: "#FDE68A", badgeText: "#92400E", icon: "📖" }, // Amber
+  { bg: "#DBEAFE", border: "#3B82F6", text: "#1E3A8A", badgeBg: "#BFDBFE", badgeText: "#1D4ED8", icon: "📐" }, // Blue
+  { bg: "#D1FAE5", border: "#10B981", text: "#064E3B", badgeBg: "#A7F3D0", badgeText: "#047857", icon: "🔬" }, // Emerald
+  { bg: "#CCFBF1", border: "#14B8A6", text: "#134E4A", badgeBg: "#99F6E4", badgeText: "#0F766E", icon: "🔤" }, // Teal
+  { bg: "#FFE4E6", border: "#F43F5E", text: "#881337", badgeBg: "#FECDD3", badgeText: "#BE123C", icon: "🌍" }, // Rose
+  { bg: "#EDE9FE", border: "#8B5CF6", text: "#4C1D95", badgeBg: "#DDD6FE", badgeText: "#6D28D9", icon: "✨" }, // Violet
+  { bg: "#E0E7FF", border: "#6366F1", text: "#312E81", badgeBg: "#C7D2FE", badgeText: "#4338CA", icon: "💻" }, // Indigo
+  { bg: "#ECFCCB", border: "#84CC16", text: "#365314", badgeBg: "#D9F99D", badgeText: "#4D7C0F", icon: "⚽" }, // Lime
+  { bg: "#FFEDD5", border: "#F97316", text: "#7C2D12", badgeBg: "#FED7AA", badgeText: "#C2410C", icon: "🎨" }, // Orange
+  { bg: "#FCE7F3", border: "#EC4899", text: "#831843", badgeBg: "#FBCFE8", badgeText: "#BE185D", icon: "🎵" }, // Pink
+  { bg: "#F5D0FE", border: "#D946EF", text: "#701A75", badgeBg: "#E879F9", badgeText: "#86198F", icon: "🗣️" }, // Fuchsia
+  { bg: "#E0F2FE", border: "#0EA5E9", text: "#0C4A6E", badgeBg: "#BAE6FD", badgeText: "#0369A1", icon: "🛠️" }, // Sky
+  { bg: "#FFFBEB", border: "#F59E0B", text: "#78350F", badgeBg: "#FEF3C7", badgeText: "#B45309", icon: "💡" }, // Amber Warm
+  { bg: "#F1F5F9", border: "#64748B", text: "#0F172A", badgeBg: "#E2E8F0", badgeText: "#334155", icon: "⚙️" }, // Slate
+  { bg: "#FEF9C3", border: "#EAB308", text: "#713F12", badgeBg: "#FEF08A", badgeText: "#854D0E", icon: "🌟" }, // Yellow
+  { bg: "#DCFCE7", border: "#22C55E", text: "#14532D", badgeBg: "#BBF7D0", badgeText: "#15803D", icon: "🌱" }, // Forest
 ];
+
+const SECTION_PALETTE = RICH_PALETTES;
+
+export function getSubjectPalette(subjectName: string = ""): CellPalette {
+  const s = subjectName.trim().toLowerCase();
+  if (s.includes("عرب") || s.includes("قرائ") || s.includes("نصوص") || s.includes("خط") || s.includes("إملاء")) {
+    return { bg: "#FEF3C7", border: "#F59E0B", text: "#78350F", badgeBg: "#FDE68A", badgeText: "#92400E", icon: "📖" };
+  }
+  if (s.includes("رياض") || s.includes("حساب") || s.includes("جبر") || s.includes("هندس") || s.includes("math")) {
+    return { bg: "#DBEAFE", border: "#3B82F6", text: "#1E3A8A", badgeBg: "#BFDBFE", badgeText: "#1D4ED8", icon: "📐" };
+  }
+  if (s.includes("علوم") || s.includes("كيميا") || s.includes("فيزيا") || s.includes("أحياء") || s.includes("science")) {
+    return { bg: "#D1FAE5", border: "#10B981", text: "#064E3B", badgeBg: "#A7F3D0", badgeText: "#047857", icon: "🔬" };
+  }
+  if (s.includes("إنجليز") || s.includes("انجليز") || s.includes("english") || s.includes("أجنبي")) {
+    return { bg: "#CCFBF1", border: "#14B8A6", text: "#134E4A", badgeBg: "#99F6E4", badgeText: "#0F766E", icon: "🔤" };
+  }
+  if (s.includes("دراسات") || s.includes("تاريخ") || s.includes("جغرافيا") || s.includes("اجتماع")) {
+    return { bg: "#FFE4E6", border: "#F43F5E", text: "#881337", badgeBg: "#FECDD3", badgeText: "#BE123C", icon: "🌍" };
+  }
+  if (s.includes("دين") || s.includes("قرآن") || s.includes("إسلام") || s.includes("مسيح")) {
+    return { bg: "#EDE9FE", border: "#8B5CF6", text: "#4C1D95", badgeBg: "#DDD6FE", badgeText: "#6D28D9", icon: "✨" };
+  }
+  if (s.includes("حاسب") || s.includes("كمبيوتر") || s.includes("تكنولوج") || s.includes("ict")) {
+    return { bg: "#E0E7FF", border: "#6366F1", text: "#312E81", badgeBg: "#C7D2FE", badgeText: "#4338CA", icon: "💻" };
+  }
+  if (s.includes("رياضية") || s.includes("ألعاب") || s.includes("بدني") || s.includes("sport") || s.includes("gym")) {
+    return { bg: "#ECFCCB", border: "#84CC16", text: "#365314", badgeBg: "#D9F99D", badgeText: "#4D7C0F", icon: "⚽" };
+  }
+  if (s.includes("فني") || s.includes("رسم") || s.includes("موسيق") || s.includes("art")) {
+    return { bg: "#FFEDD5", border: "#F97316", text: "#7C2D12", badgeBg: "#FED7AA", badgeText: "#C2410C", icon: "🎨" };
+  }
+  if (s.includes("مهارات") || s.includes("مهني") || s.includes("توكاتسو") || s.includes("نشاط")) {
+    return { bg: "#FCE7F3", border: "#EC4899", text: "#831843", badgeBg: "#FBCFE8", badgeText: "#BE185D", icon: "🛠️" };
+  }
+  if (s.includes("فرنس") || s.includes("ألمان") || s.includes("إيطال")) {
+    return { bg: "#F5D0FE", border: "#D946EF", text: "#701A75", badgeBg: "#E879F9", badgeText: "#86198F", icon: "🗣️" };
+  }
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash << 5) - hash + s.charCodeAt(i);
+    hash |= 0;
+  }
+  return { ...RICH_PALETTES[Math.abs(hash) % RICH_PALETTES.length], icon: "📚" };
+}
+
 
 export default function App() {
   const [backendUrl] = useState(() => {
@@ -149,12 +211,33 @@ export default function App() {
   const [selectedConstraintTeacherId, setSelectedConstraintTeacherId] = useState(() => initialActiveEntry?.school?.teachers[0]?.id || "TCH_RYA");
   const [selectedSwapEntry, setSelectedSwapEntry] = useState<TimetableEntry | null>(null);
   const [pendingDiff, setPendingDiff] = useState<TimetableDiffReport | null>(null);
+  const [colorMode, setColorMode] = useState<"subject" | "section">("subject");
+  const [cellDensity, setCellDensity] = useState<"compact" | "balanced" | "spacious">("balanced");
+  const [masterRowMode, setMasterRowMode] = useState<"teachers" | "sections">("teachers");
+  const [timetableSearch, setTimetableSearch] = useState<string>("");
+  const [timetableDayFilter, setTimetableDayFilter] = useState<number | null>(null);
+  const [isTimetableFullscreen, setIsTimetableFullscreen] = useState<boolean>(false);
+  const [timetableZoom, setTimetableZoom] = useState<number>(85); // Default lower zoom (85%)
+  const [mergeDoublePeriods, setMergeDoublePeriods] = useState<boolean>(true); // Visually connect double periods as unified block
 
-  const togglePinEntry = (entry: TimetableEntry) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isTimetableFullscreen) {
+        setIsTimetableFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isTimetableFullscreen]);
+
+  const togglePinEntry = (entry: TimetableEntry, paired?: TimetableEntry) => {
     setSchedule((prev) => {
       if (!prev) return prev;
+      const idsToToggle = new Set([entry.entry_id]);
+      if (paired) idsToToggle.add(paired.entry_id);
+      const targetPinned = !entry.is_pinned;
       const nextEntries = prev.entries.map((e) =>
-        e.entry_id === entry.entry_id ? { ...e, is_pinned: !e.is_pinned } : e
+        idsToToggle.has(e.entry_id) ? { ...e, is_pinned: targetPinned } : e
       );
       return { ...prev, entries: nextEntries };
     });
@@ -441,7 +524,21 @@ export default function App() {
       return false;
     }
   });
-  const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
+  // 3-Stage Floating Chat Bot: circle -> input_bar -> full_sheet
+  const [chatFabState, setChatFabState] = useState<"circle" | "input_bar" | "full_sheet">("circle");
+  const [mobileHeaderMenuOpen, setMobileHeaderMenuOpen] = useState(false);
+  const [showMobileTableFilters, setShowMobileTableFilters] = useState(false);
+  const chatBarInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (chatFabState === "input_bar") {
+      const timer = setTimeout(() => {
+        chatBarInputRef.current?.focus();
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [chatFabState]);
+
   const isResizingRef = useRef(false);
 
   const handleStartResize = (e: React.MouseEvent) => {
@@ -766,6 +863,7 @@ export default function App() {
     const msg = (customPrompt ?? chatInput).trim();
     if (!msg) return;
     if (!customPrompt) setChatInput("");
+    setChatFabState("full_sheet");
     const activeSchool = school || createBlankSchoolTemplate("مدرسة جديدة", 7).school;
     const activeRawText = rawText || createBlankSchoolTemplate("مدرسة جديدة", 7).raw_text;
     const nowTime = new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
@@ -780,7 +878,7 @@ export default function App() {
       const targetSchool = res.updated_school || activeSchool;
       if (res.updated_school) {
         setSchool(res.updated_school);
-        if (res.updated_school.name !== school.name || res.updated_school.id !== school.id) {
+        if (school && (res.updated_school.name !== school.name || res.updated_school.id !== school.id)) {
           const newEntry: SavedSchoolEntry = {
             id: res.updated_school.id,
             name: res.updated_school.name,
@@ -961,6 +1059,16 @@ export default function App() {
     setSchool({ ...school, teachers: updatedTeachers });
   }
 
+  function handleUpdateSchoolFromHub(updatedSchool: SchoolData, summaryMessage?: string) {
+    setSchool(updatedSchool);
+    const md = generateSchoolMarkdown(updatedSchool);
+    setRawText(md);
+    const ana = InBrowserSchoolEngine.analyzeSchool(updatedSchool);
+    setAnalysis(ana);
+    persistSchoolData(updatedSchool, md, schedule, ana);
+    if (summaryMessage) setStatusMessage(summaryMessage);
+  }
+
   function addPlacementRule() {
     if (!school || !selectedConstraintTeacherId) return;
     const updated = school.teachers.map((t) => {
@@ -1001,10 +1109,75 @@ export default function App() {
       {name}
     </span>
   );
-  function getSectionPalette(sectionId: string) {
-    if (!school) return SECTION_PALETTE[0];
+  function getSectionPalette(sectionId: string): CellPalette {
+    if (!school) return RICH_PALETTES[0];
     const idx = school.sections.findIndex((s) => s.id === sectionId);
-    return SECTION_PALETTE[(idx >= 0 ? idx : 0) % SECTION_PALETTE.length];
+    return RICH_PALETTES[(idx >= 0 ? idx : 0) % RICH_PALETTES.length];
+  }
+
+  function getCellPalette(entry: TimetableEntry): CellPalette {
+    if (colorMode === "subject") {
+      return getSubjectPalette(getSubjectName(entry.subject_id));
+    }
+    return getSectionPalette(entry.section_id);
+  }
+
+  function isDoublePeriod(entry: TimetableEntry, allEntries: TimetableEntry[]): boolean {
+    return allEntries.some(
+      (other) =>
+        other.entry_id !== entry.entry_id &&
+        other.section_id === entry.section_id &&
+        other.teacher_id === entry.teacher_id &&
+        other.subject_id === entry.subject_id &&
+        other.day === entry.day &&
+        (other.period === entry.period + 1 || other.period === entry.period - 1)
+    );
+  }
+
+  function handleCellSwapClick(entry: TimetableEntry, pairedEntry?: TimetableEntry) {
+    if (!selectedSwapEntry) {
+      setSelectedSwapEntry(entry);
+      setStatusMessage(
+        pairedEntry
+          ? `🔄 تم تحديد [${getSubjectName(entry.subject_id)} (ح ${entry.period}-${pairedEntry.period})]. انقر على حصة أخرى للمبادلة!`
+          : `🔄 تم تحديد [${getSubjectName(entry.subject_id)} (ح ${entry.period})]. انقر على حصة أخرى للمبادلة!`
+      );
+      return;
+    }
+
+    if (selectedSwapEntry.entry_id === entry.entry_id) {
+      setSelectedSwapEntry(null);
+      setStatusMessage("تم إلغاء التحديد.");
+      return;
+    }
+
+    if (!school || !schedule) return;
+    try {
+      const swappedEntries = schedule.entries.map((e) => {
+        if (e.entry_id === selectedSwapEntry.entry_id) {
+          return { ...e, day: entry.day, period: entry.period };
+        }
+        if (e.entry_id === entry.entry_id) {
+          return { ...e, day: selectedSwapEntry.day, period: selectedSwapEntry.period };
+        }
+        return e;
+      });
+
+      const previewSchedule: Schedule = {
+        ...schedule,
+        entries: swappedEntries,
+      };
+
+      const diff = calculateTimetableDiff(schedule, previewSchedule, school);
+      setSelectedSwapEntry(null);
+      if (diff) {
+        setPendingDiff(diff);
+        setStatusMessage("✅ تم احتساب التبديل! راجع المعاينة للاعتماد.");
+      }
+    } catch (err: any) {
+      setSelectedSwapEntry(null);
+      setErrorMessage(`خطأ أثناء المبادلة: ${err?.message || err}`);
+    }
   }
 
   const activeConstraintTeacher = useMemo(
@@ -1064,11 +1237,11 @@ export default function App() {
           {isMobile ? (
             <button
               type="button"
-              onClick={() => setIsMobileSheetOpen(false)}
+              onClick={() => setChatFabState("circle")}
               className="text-xs text-slate-300 hover:text-white px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition font-bold"
-              title="إغلاق اللوحة"
+              title="طي المحادثة"
             >
-              ✕ إغلاق
+              ✕ طي
             </button>
           ) : (
             <button
@@ -1140,13 +1313,13 @@ export default function App() {
                 <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs animate-spin">
                   ⚙️
                 </div>
-                <span className="font-extrabold text-blue-950 text-xs">جاري المعالجة بضمان 0% تعارضات...</span>
+                <span className="font-extrabold text-blue-950 text-xs">جاري التفكير وتحليل بيانات المدرسة والجدول...</span>
               </div>
               <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
                 {chatLoadingStep === 1
-                  ? "1 / 3 فهم وتحليل"
+                  ? "1 / 3 فهم واستعلام"
                   : chatLoadingStep === 2
-                  ? "2 / 3 تحديث الوثيقة"
+                  ? "2 / 3 صياغة الرد"
                   : "3 / 3 حل وتوزيع"}
               </span>
             </div>
@@ -1163,11 +1336,11 @@ export default function App() {
             <div className="space-y-1 text-[11px]">
               <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 1 ? "text-blue-950 font-bold" : "text-slate-400"}`}>
                 <span>{chatLoadingStep > 1 ? "✅" : "🔍"}</span>
-                <span>تحليل وفهم الأمر بالعامية والتحقق من المعلمين</span>
+                <span>فحص السؤال والاطلاع على المعلمين والفصول والأنصبة</span>
               </div>
               <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 2 ? "text-indigo-950 font-bold" : "text-slate-400"}`}>
                 <span>{chatLoadingStep > 2 ? "✅" : chatLoadingStep === 2 ? "⏳" : "📝"}</span>
-                <span>تحديث وثيقة الـ Markdown وسجل الإسناد والقيود</span>
+                <span>صياغة الرد الشامل وتحديث وثيقة المدرسة إن وُجد تعديل</span>
               </div>
               <div className={`flex items-center gap-1.5 ${chatLoadingStep >= 3 ? "text-emerald-950 font-bold" : "text-slate-400"}`}>
                 <span>{chatLoadingStep === 3 ? "⚙️" : "📊"}</span>
@@ -1179,34 +1352,15 @@ export default function App() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Fixed Input Area at Bottom */}
-      <div className="p-3 border-t border-slate-200 bg-white shrink-0 space-y-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
-          {[
-            "اديله اجازة التلات",
-            "خليه ياخد اول حصتين",
-            "بدل حصص كمال مع يوسف",
-            "سو جدول جديد الحين",
-          ].map((chip, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => handleSendChat(chip)}
-              disabled={loading}
-              className="bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 px-2.5 py-1 rounded-lg shrink-0 font-bold border border-slate-200 transition"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-
+      {/* Clean Conversational Input Area at Bottom (Without Quick Chips) */}
+      <div className="p-3 border-t border-slate-200 bg-white shrink-0">
         <div className="flex gap-2">
           <input
             type="text"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSendChat()}
-            placeholder="اطلب تعديل أي قيد أو إجازة أو تبديل حصص..."
+            placeholder="اسأل عن أي شيء يخص المدرسة والجدول، أو اطلب تعديلاً..."
             className="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none placeholder:text-slate-400 bg-white"
           />
           <button
@@ -1226,29 +1380,143 @@ export default function App() {
   return (
     <div dir="rtl" className="min-h-screen bg-slate-100 text-slate-900 font-sans">
       {/* Header */}
-      <header className="bg-slate-900 text-white px-6 py-3.5 shadow-lg flex flex-wrap items-center justify-between gap-4">
+      <header className="bg-slate-900 text-white px-4 sm:px-6 py-3 sm:py-3.5 shadow-lg flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-lg font-extrabold flex items-center gap-2">
+          <h1 className="text-base sm:text-lg font-extrabold flex items-center gap-2">
             <span>🗓️</span>
-            <span>AI Studio — نظام إنشاء جداول الحصص المدرسية الذكي</span>
+            <span>المنظومة الذكية للجداول المدرسية</span>
           </h1>
-          <p className="text-xs text-slate-400">
-            منظومة ذكية متكاملة لإعداد جداول الحصص بمحرك القيود والاستمثال (TypeScript Solver) وتكامل Gemini AI
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
+            توليد جداول متوازنة خالية من التعارضات بالاستمثال والذكاء الاصطناعي
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Global School Switcher & Persistence Toolbar */}
-          <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl p-1 shadow-inner">
+        {/* Responsive Header Toolbar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
+          {/* Mobile-only Top Action Strip: School Selector + Save + More Menu */}
+          <div className="flex items-center gap-1.5 w-full sm:hidden">
+            <select
+              value={selectedPreset}
+              onChange={(e) => handleLoadPreset(e.target.value)}
+              className="bg-slate-800 border border-slate-700 text-white rounded-xl px-2.5 py-1.5 text-xs font-bold shadow-inner focus:ring-2 focus:ring-blue-400 focus:outline-none flex-1 truncate"
+              title="التبديل بين المدارس المحفوظة"
+            >
+              {allSchoolsList.length === 0 ? (
+                <option value="">(لا توجد مدارس)</option>
+              ) : (
+                allSchoolsList.map((p) => (
+                  <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                    {p.name}
+                  </option>
+                ))
+              )}
+            </select>
+
+            {school && (
+              <button
+                type="button"
+                onClick={handleSaveCurrentSchool}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-xl shadow-xs transition shrink-0"
+                title="حفظ بيانات المدرسة والجدول"
+              >
+                💾 حفظ
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setMobileHeaderMenuOpen(!mobileHeaderMenuOpen)}
+              className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-xl border border-slate-700 shadow-xs transition shrink-0"
+              title="خيارات المدرسة والمفاتيح"
+            >
+              {mobileHeaderMenuOpen ? "✕" : "⚙️ المزيد"}
+            </button>
+          </div>
+
+          {/* Mobile Dropdown Menu */}
+          {mobileHeaderMenuOpen && (
+            <div className="sm:hidden bg-slate-800 rounded-2xl border border-slate-700 p-2.5 space-y-1.5 shadow-2xl animate-in fade-in duration-150">
+              <div className="grid grid-cols-2 gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddSchoolModal(true);
+                    setMobileHeaderMenuOpen(false);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold p-2 rounded-xl text-center transition"
+                >
+                  ➕ مدرسة جديدة
+                </button>
+                {school && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleDuplicateSchool();
+                        setMobileHeaderMenuOpen(false);
+                      }}
+                      className="bg-slate-700 hover:bg-slate-600 text-white font-bold p-2 rounded-xl text-center transition"
+                    >
+                      📋 نسخ المدرسة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleDeleteSchool(selectedPreset);
+                        setMobileHeaderMenuOpen(false);
+                      }}
+                      className="bg-rose-900/70 hover:bg-rose-800 text-rose-200 p-2 rounded-xl text-center transition"
+                    >
+                      🗑️ حذف المدرسة
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleExportBackupJson();
+                    setMobileHeaderMenuOpen(false);
+                  }}
+                  className="bg-indigo-700 hover:bg-indigo-600 text-white font-bold p-2 rounded-xl text-center transition"
+                >
+                  📤 تصدير JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    backupFileInputRef.current?.click();
+                    setMobileHeaderMenuOpen(false);
+                  }}
+                  className="bg-teal-700 hover:bg-teal-600 text-white font-bold p-2 rounded-xl text-center transition"
+                >
+                  📥 استيراد JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    refreshKeysState();
+                    setShowKeyManagerModal(true);
+                    setMobileHeaderMenuOpen(false);
+                  }}
+                  className="bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 font-bold p-2 rounded-xl text-center border border-amber-500/30 transition col-span-2"
+                >
+                  🔑 إدارة مفاتيح Gemini ({userKeys.filter((k) => k.enabled).length} مفعل)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Desktop & Tablet Toolbar (Clean Single Row) */}
+          <div className="hidden sm:flex flex-wrap items-center gap-1 bg-slate-800/90 border border-slate-700 rounded-xl p-1 shadow-inner">
             <span className="text-xs px-1 text-slate-300">🏫</span>
             <select
               value={selectedPreset}
               onChange={(e) => handleLoadPreset(e.target.value)}
-              className="bg-slate-900 border border-slate-600 text-white rounded-lg px-2.5 py-1 text-xs font-bold shadow-inner focus:ring-2 focus:ring-blue-400 focus:outline-none max-w-[210px] truncate"
+              className="bg-slate-900 border border-slate-600 text-white rounded-lg px-2 py-1 text-xs font-bold shadow-inner focus:ring-2 focus:ring-blue-400 focus:outline-none min-w-[130px] max-w-[190px] truncate"
               title="التبديل بين المدارس المحفوظة"
             >
               {allSchoolsList.length === 0 ? (
-                <option value="">(لا توجد مدارس مضافة)</option>
+                <option value="">(لا توجد مدارس)</option>
               ) : (
                 allSchoolsList.map((p) => (
                   <option key={p.id} value={p.id} className="bg-slate-900 text-white">
@@ -1261,11 +1529,11 @@ export default function App() {
             <button
               type="button"
               onClick={() => setShowAddSchoolModal(true)}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-2.5 py-1 rounded-lg shadow-xs flex items-center gap-1 transition"
-              title="إنشاء أو إضافة مدرسة جديدة"
+              className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-2 py-1 rounded-lg shadow-xs flex items-center gap-1 transition cursor-pointer"
+              title="إضافة مدرسة جديدة"
             >
               <span>➕</span>
-              <span>جديدة</span>
+              <span>مدرسة</span>
             </button>
 
             {school && (
@@ -1273,8 +1541,8 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleSaveCurrentSchool}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-2.5 py-1 rounded-lg shadow-xs flex items-center gap-1 transition"
-                  title="حفظ بيانات المدرسة الحالية والجدول الأخير في ذاكرة المتصفح"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-2 py-1 rounded-lg shadow-xs flex items-center gap-1 transition cursor-pointer"
+                  title="حفظ بيانات المدرسة والجدول بالمتصفح"
                 >
                   <span>💾</span>
                   <span>حفظ</span>
@@ -1283,8 +1551,8 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleDuplicateSchool}
-                  className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold text-xs px-2 py-1 rounded-lg border border-slate-600 flex items-center gap-1 transition"
-                  title="نسخ المدرسة الحالية كمسودة جديدة للتعديل عليها"
+                  className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold text-xs px-2 py-1 rounded-lg border border-slate-600 flex items-center gap-1 transition cursor-pointer"
+                  title="نسخ المدرسة الحالية كمسودة جديدة"
                 >
                   <span>📋</span>
                   <span>نسخ</span>
@@ -1293,8 +1561,8 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => handleDeleteSchool(selectedPreset)}
-                  className="bg-rose-900/60 hover:bg-rose-800 text-rose-200 hover:text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-rose-700/60 shadow-xs flex items-center gap-1 transition"
-                  title="حذف هذه المدرسة نهائياً"
+                  className="bg-rose-900/60 hover:bg-rose-800 text-rose-200 hover:text-white font-bold text-xs px-2 py-1 rounded-lg border border-rose-700/60 shadow-xs flex items-center gap-1 transition cursor-pointer"
+                  title="حذف المدرسة الحالية"
                 >
                   <span>🗑️</span>
                   <span>حذف</span>
@@ -1305,21 +1573,21 @@ export default function App() {
             <button
               type="button"
               onClick={handleExportBackupJson}
-              className="bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-indigo-500/60 shadow-xs flex items-center gap-1 transition"
-              title="تصدير نسخة احتياطية كاملة (JSON) لبيانات مدارسك وجداولك (بدون مفاتيح API)"
+              className="bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs px-2 py-1 rounded-lg border border-indigo-500/60 shadow-xs flex items-center gap-1 transition cursor-pointer"
+              title="تصدير نسخة احتياطية JSON"
             >
               <span>📤</span>
-              <span>تصدير JSON</span>
+              <span>تصدير</span>
             </button>
 
             <button
               type="button"
               onClick={() => backupFileInputRef.current?.click()}
-              className="bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-teal-500/60 shadow-xs flex items-center gap-1 transition"
-              title="استيراد واستعادة نسخة احتياطية (JSON) مع التحقق التلقائي من سلامة البيانات"
+              className="bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs px-2 py-1 rounded-lg border border-teal-500/60 shadow-xs flex items-center gap-1 transition cursor-pointer"
+              title="استيراد نسخة احتياطية JSON"
             >
               <span>📥</span>
-              <span>استيراد JSON</span>
+              <span>استيراد</span>
             </button>
             <input
               ref={backupFileInputRef}
@@ -1328,31 +1596,32 @@ export default function App() {
               onChange={handleImportBackupJsonFile}
               className="hidden"
             />
+
+            <button
+              type="button"
+              onClick={() => {
+                refreshKeysState();
+                setShowKeyManagerModal(true);
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-xs px-2.5 py-1 rounded-lg shadow flex items-center gap-1 transition shrink-0 cursor-pointer"
+              title="إدارة مفاتيح Gemini API وتدويرها"
+            >
+              <span>🔑</span>
+              <span>المفاتيح</span>
+              <span className="bg-amber-500/20 text-amber-200 border border-amber-500/40 px-1 py-0.2 rounded text-[10px]">
+                {userKeys.filter((k) => k.enabled).length}
+              </span>
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              refreshKeysState();
-              setShowKeyManagerModal(true);
-            }}
-            className="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-xs px-3 py-2 rounded-xl shadow flex items-center gap-1.5 transition"
-            title="إدارة مفاتيح Gemini API الخاصة بك (BYOK) وتدويرها التلقائي"
-          >
-            <span>🔑</span>
-            <span>مفاتيح Gemini</span>
-            <span className="bg-amber-500/20 text-amber-200 border border-amber-500/40 px-1.5 py-0.5 rounded-md text-[10px]">
-              {userKeys.filter((k) => k.enabled).length}
-            </span>
-          </button>
-
+          {/* Primary Solve / Generate Button */}
           <button
             onClick={handleSolve}
             disabled={loading || !school}
-            className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow flex items-center gap-1.5 transition"
+            className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-extrabold text-xs px-4 py-2 rounded-xl shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
           >
             <span>⚡</span>
-            <span>{loading ? "⏳ جاري المعالجة..." : "إنشاء الجدول الآن (محرك الاستمثال الذكي)"}</span>
+            <span>{loading ? "جاري التوليد..." : "إنشاء الجدول"}</span>
           </button>
         </div>
       </header>
@@ -1890,19 +2159,19 @@ export default function App() {
 
         {/* Main Content Workspace (Takes full remaining width) */}
         <main className="flex-1 min-w-0 space-y-4">
-          <div className="bg-white rounded-xl p-1.5 shadow-sm border border-slate-200 flex flex-wrap gap-1.5">
+          <div className="bg-white rounded-xl p-1 shadow-sm border border-slate-200 flex flex-wrap gap-1">
             {[
-              { id: "wizard", label: "🧙‍♂️ معالج المدرسة (6 خطوات)" },
-              { id: "timetable", label: "📅 عرض الجدول والتصدير" },
-              { id: "constraints", label: "🔒 القيود والإجازات" },
-              { id: "analyze", label: "📊 التحليل والجدوى" },
-              { id: "ingest", label: "📝 المحرر النصي (Markdown)" },
+              { id: "wizard", label: "🧙‍♂️ المعالج" },
+              { id: "timetable", label: "📅 جدول الحصص" },
+              { id: "constraints", label: "👥 المعلمون والتكليفات" },
+              { id: "analyze", label: "📊 تحليل الجدوى" },
+              { id: "ingest", label: "📝 المحرر النصي" },
             ].map((t) => (
               <button
                 key={t.id}
                 onClick={() => setActiveTab(t.id as any)}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition ${
-                  activeTab === t.id ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                className={`flex-1 min-w-[95px] py-2 px-2.5 rounded-lg text-xs font-bold transition text-center whitespace-nowrap cursor-pointer ${
+                  activeTab === t.id ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 }`}
               >
                 {t.label}
@@ -2007,26 +2276,26 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleSaveCurrentSchool}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition"
-                    title="حفظ بيانات المدرسة الحالية في المتصفح"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition cursor-pointer"
+                    title="حفظ بيانات المدرسة في المتصفح"
                   >
                     <span>💾</span>
-                    <span>حفظ التعديلات</span>
+                    <span>حفظ</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowAddSchoolModal(true)}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition"
-                    title="إنشاء مدرسة جديدة بنموذج جاهز أو بالذكاء الاصطناعي"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition cursor-pointer"
+                    title="إضافة مدرسة جديدة"
                   >
                     <span>➕</span>
-                    <span>مدرسة جديدة</span>
+                    <span>جديدة</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleDuplicateSchool}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1 transition"
-                    title="عمل نسخة من المدرسة الحالية للتعديل عليها"
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1 transition cursor-pointer"
+                    title="نسخ المدرسة"
                   >
                     <span>📋</span>
                     <span>نسخ</span>
@@ -2035,8 +2304,8 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => handleDeleteSchool(selectedPreset)}
-                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-rose-200 flex items-center gap-1 transition"
-                      title="حذف هذه المدرسة نهائياً"
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-rose-200 flex items-center gap-1 transition cursor-pointer"
+                      title="حذف المدرسة"
                     >
                       <span>🗑️</span>
                       <span>حذف</span>
@@ -2051,20 +2320,20 @@ export default function App() {
                 className="w-full border rounded-xl p-4 text-xs font-mono bg-slate-50"
                 placeholder="الصق هنا نص بيانات المدرسة..."
               />
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-2.5">
                 <button
                   onClick={handleParseRawText}
                   disabled={loading || !rawText.trim()}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl"
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
                 >
-                  🧠 تحليل وفهم النص بالـ AI
+                  🧠 تحليل النص
                 </button>
                 <button
                   onClick={handleSolve}
                   disabled={loading || !school}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
                 >
-                  ⚡ إنشاء الجدول مباشرةً
+                  ⚡ إنشاء الجدول
                 </button>
               </div>
             </div>
@@ -2076,7 +2345,7 @@ export default function App() {
                 <div className="p-3 bg-slate-50 rounded-xl border">
                   <div className="text-xs text-slate-500">حالة الجدوى</div>
                   <div className={`text-base font-extrabold ${analysis.is_feasible ? "text-emerald-600" : "text-rose-600"}`}>
-                    {analysis.is_feasible ? "صالحة للحل 100%" : "يوجد اختناق"}
+                    {analysis.is_feasible ? "قابلة للحل 100%" : "يوجد تعارض"}
                   </div>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-xl border">
@@ -2096,44 +2365,15 @@ export default function App() {
           )}
 
           {activeTab === "constraints" && school && (
-            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
-              <h3 className="text-sm font-extrabold">مصفوفة أيام عمل وإجازات المعلمين</h3>
-              <div className="overflow-x-auto max-h-96">
-                <table className="w-full text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100">
-                      <th className="p-2 border text-start">المعلم</th>
-                      {school.days.map((d) => (
-                        <th key={d} className="p-2 border text-center">{DAY_NAMES_AR[d]}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {school.teachers.map((tch) => (
-                      <tr key={tch.id}>
-                        <td className="p-2 border font-bold">{tch.name}</td>
-                        {school.days.map((d) => {
-                          const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
-                          return (
-                            <td key={d} className="p-1.5 border text-center">
-                              <button
-                                onClick={() => toggleTeacherDayOff(tch.id, d)}
-                                className={`px-2 py-1 rounded text-[11px] font-bold ${
-                                  isOff ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-800"
-                                }`}
-                              >
-                                {isOff ? "إجازة ✗" : "متاح ✓"}
-                              </button>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <TeacherManagementHub
+              school={school}
+              onUpdateSchool={handleUpdateSchoolFromHub}
+              onSolveSchool={() => handleSolve(school)}
+              selectedTeacherId={selectedTeacherId}
+              onSelectTeacherId={setSelectedTeacherId}
+            />
           )}
+
 
           {activeTab === "timetable" && school && (
             <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
@@ -2197,109 +2437,561 @@ export default function App() {
                 />
               )}
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+              {/* Swap Mode Notification Bar */}
+              {selectedSwapEntry && (
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 text-white rounded-xl shadow-md text-xs font-bold animate-fadeIn">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base animate-bounce">🔄</span>
+                    <span>
+                      وضع تبديل الحصص نشط: تم تحديد [{getSubjectName(selectedSwapEntry.subject_id)} - {getSectionName(selectedSwapEntry.section_id)} ({DAY_NAMES_AR[selectedSwapEntry.day]} ح {selectedSwapEntry.period})]. انقر على أي حصة أخرى في الجدول لتبديل المكانين فوراً بدون تعارض!
+                    </span>
+                  </div>
                   <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSwapEntry(null);
+                      setStatusMessage("تم إلغاء تحديد الحصة.");
+                    }}
+                    className="bg-white/20 hover:bg-white/30 text-white px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition shrink-0"
+                  >
+                    إلغاء المبادلة ✕
+                  </button>
+                </div>
+              )}
+
+              {/* View Switcher & Action Bar (Row 1) */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200">
+                <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                  <button
+                    type="button"
                     onClick={() => setViewMode("master")}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
-                      viewMode === "master" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      viewMode === "master" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
-                    🗺️ الجدول العام الشامل
+                    <span>🗺️</span>
+                    <span>الجدول العام</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setViewMode("section")}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
-                      viewMode === "section" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      viewMode === "section" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
-                    🏫 جداول الفصول
+                    <span>🏫</span>
+                    <span>الفصول</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setViewMode("teacher")}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
-                      viewMode === "teacher" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      viewMode === "teacher" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
-                    👨‍🏫 جداول المعلمين
+                    <span>👨‍🏫</span>
+                    <span>المعلمون</span>
                   </button>
                 </div>
 
                 {schedule && schedule.entries.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5">
                     <button
+                      type="button"
+                      onClick={() => setIsTimetableFullscreen(!isTimetableFullscreen)}
+                      className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      title="تكبير أو تصغير الجدول لملء الشاشة"
+                    >
+                      <span>{isTimetableFullscreen ? "🗗" : "⛶"}</span>
+                      <span>{isTimetableFullscreen ? "إنهاء" : "ملء الشاشة"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      title="طباعة سريعة للجدول المعروض"
+                    >
+                      <span>🖨️</span>
+                      <span>طباعة</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "master").catch((e) => setErrorMessage(e.message))}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition"
-                      title="طباعة الجدول العام بحجم A3 Landscape"
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      title="طباعة الجدول العام A3"
                     >
                       <span>🗺️</span>
-                      <span>PDF العام A3</span>
+                      <span>PDF العام</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "sections").catch((e) => setErrorMessage(e.message))}
-                      className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition"
-                      title="طباعة بطاقات الفصول (2 في الصفحة A4 مع خط قص مقص ✂)"
+                      className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      title="طباعة بطاقات الفصول A4"
                     >
                       <span>✂</span>
-                      <span>بطاقات الفصول A4</span>
+                      <span>بطاقات الفصول</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "teachers").catch((e) => setErrorMessage(e.message))}
-                      className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition"
-                      title="طباعة بطاقات المعلمين (2 في الصفحة A4 مع خط قص مقص ✂)"
+                      className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      title="طباعة بطاقات المعلمين A4"
                     >
                       <span>👨‍🏫</span>
-                      <span>بطاقات المعلمين A4</span>
+                      <span>بطاقات المعلمين</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => service.downloadExport("pdf", school, schedule, "all").catch((e) => setErrorMessage(e.message))}
-                      className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition"
-                      title="طباعة وتصدير ملف PDF الشامل للمدرسة"
+                      className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      title="تصدير ملف PDF الشامل"
                     >
                       <span>📄</span>
                       <span>PDF الشامل</span>
                     </button>
                     <button
+                      type="button"
                       onClick={() => service.downloadExport("excel", school, schedule, "all").catch((e) => setErrorMessage(e.message))}
-                      className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg shadow-sm flex items-center gap-1 transition"
-                      title="تصدير كود إكسيل حقيقي يحتوي على 4 أوراق عمل منسقة بالألوان والأنصبة"
+                      className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-2xs flex items-center gap-1 transition cursor-pointer"
+                      title="تصدير إكسيل ملون 4 صفحات"
                     >
                       <span>📊</span>
-                      <span>Excel ملون (4 أوراق)</span>
+                      <span>Excel ملون</span>
                     </button>
                   </div>
                 )}
+              </div>
+
+              {/* Responsive Timetable Controls Toolbar */}
+              <div className="bg-slate-50/90 rounded-2xl border border-slate-200 p-2.5 space-y-2 text-xs shadow-xs">
+                {/* Row 1: Search Bar & Horizontal Scroll Day Filter */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                  {/* Search Input */}
+                  <div className="relative flex-1 min-w-[150px] max-w-full sm:max-w-xs">
+                    <span className="absolute start-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                    <input
+                      type="text"
+                      value={timetableSearch}
+                      onChange={(e) => setTimetableSearch(e.target.value)}
+                      placeholder="بحث عن معلم أو مادة أو فصل..."
+                      className="w-full ps-8 pe-7 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {timetableSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setTimetableSearch("")}
+                        className="absolute end-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-xs cursor-pointer"
+                        title="مسح البحث"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Horizontal Scroll Day Filter (Smooth thumb navigation on mobile) */}
+                  <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                    <span className="text-[10px] text-slate-400 font-bold shrink-0">اليوم:</span>
+                    <button
+                      type="button"
+                      onClick={() => setTimetableDayFilter(null)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border shrink-0 cursor-pointer ${
+                        timetableDayFilter === null
+                          ? "bg-blue-600 text-white border-blue-600 font-extrabold shadow-2xs"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      الكل
+                    </button>
+                    {school.days.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setTimetableDayFilter(d)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border shrink-0 cursor-pointer ${
+                          timetableDayFilter === d
+                            ? "bg-blue-600 text-white border-blue-600 font-extrabold shadow-2xs"
+                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                        }`}
+                      >
+                        {DAY_NAMES_AR[d]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Row 2: View Mode, Zoom Controls, and Display Options Toggle */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/70">
+                  <div className="flex items-center gap-1.5">
+                    {/* Master View Sub-Mode (Teachers vs Sections) */}
+                    {viewMode === "master" && (
+                      <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => setMasterRowMode("teachers")}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                            masterRowMode === "teachers" ? "bg-blue-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          بالمعلمين
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMasterRowMode("sections")}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                            masterRowMode === "sections" ? "bg-blue-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          بالفصول
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Timetable Zoom Controls (Default lower zoom 85%) */}
+                    <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] text-slate-400 px-1 font-bold">الزوم:</span>
+                      <button
+                        type="button"
+                        onClick={() => setTimetableZoom((z) => Math.max(60, z - 10))}
+                        disabled={timetableZoom <= 60}
+                        className="w-6 h-6 flex items-center justify-center rounded-lg text-xs font-black text-slate-700 hover:bg-slate-100 disabled:opacity-30 transition cursor-pointer"
+                        title="تصغير الجدول (-10%)"
+                      >
+                        −
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimetableZoom(85)}
+                        className="px-2 py-0.5 text-[11px] font-extrabold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg tabular-nums transition cursor-pointer"
+                        title="إعادة التعيين للزوم الافتراضي (85%)"
+                      >
+                        {timetableZoom}%
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTimetableZoom((z) => Math.min(140, z + 10))}
+                        disabled={timetableZoom >= 140}
+                        className="w-6 h-6 flex items-center justify-center rounded-lg text-xs font-black text-slate-700 hover:bg-slate-100 disabled:opacity-30 transition cursor-pointer"
+                        title="تكبير الجدول (+10%)"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Toggle button for extra display filters on mobile */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowMobileTableFilters(!showMobileTableFilters)}
+                      className="md:hidden px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>⚙️</span>
+                      <span>خيارات العرض</span>
+                    </button>
+                  </div>
+
+                  {/* Desktop always visible / Mobile Collapsible Filters */}
+                  <div className={`${showMobileTableFilters ? "flex" : "hidden"} md:flex flex-wrap items-center gap-2 w-full md:w-auto pt-1 md:pt-0`}>
+                    {/* Color Mode Selector */}
+                    <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200">
+                      <span className="text-[10px] text-slate-400 px-1 font-bold">التلوين:</span>
+                      <button
+                        type="button"
+                        onClick={() => setColorMode("subject")}
+                        className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
+                          colorMode === "subject" ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                        }`}
+                        title="تلوين الحقول حسب المادة"
+                      >
+                        بالمواد
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setColorMode("section")}
+                        className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
+                          colorMode === "section" ? "bg-indigo-600 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                        }`}
+                        title="تلوين الحقول حسب الفصل"
+                      >
+                        بالفصول
+                      </button>
+                    </div>
+
+                    {/* Density Selector */}
+                    <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-200">
+                      <span className="text-[10px] text-slate-400 px-1 font-bold">الكثافة:</span>
+                      <button
+                        type="button"
+                        onClick={() => setCellDensity("compact")}
+                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
+                          cellDensity === "compact" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        مدمج
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCellDensity("balanced")}
+                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
+                          cellDensity === "balanced" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        متوازن
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCellDensity("spacious")}
+                        className={`px-1.5 py-1 rounded-lg text-[10.5px] font-bold transition cursor-pointer ${
+                          cellDensity === "spacious" ? "bg-slate-900 text-white shadow-2xs" : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        موسع
+                      </button>
+                    </div>
+
+                    {/* Double Period Merge Toggle (Zero-icon) */}
+                    <button
+                      type="button"
+                      onClick={() => setMergeDoublePeriods(!mergeDoublePeriods)}
+                      className={`px-2.5 py-1 rounded-xl text-[10.5px] font-bold transition border cursor-pointer ${
+                        mergeDoublePeriods
+                          ? "bg-indigo-50 text-indigo-700 border-indigo-300 font-extrabold shadow-2xs"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                      title="دمج الحصص المزدوجة المتتالية كمستطيل موحد بنص واحد متصل"
+                    >
+                      دمج المزدوجة {mergeDoublePeriods ? "✓" : ""}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {(() => {
                 const activeSchedule = pendingDiff ? pendingDiff.preview_schedule : schedule;
                 if (!activeSchedule || !activeSchedule.entries || activeSchedule.entries.length === 0) return null;
 
+                const densityConfig = {
+                  compact: {
+                    cellHeight: "h-[52px]",
+                    cellMinHeight: "52px",
+                    cellMinWidth: "78px",
+                    primaryText: "text-[10px] font-extrabold",
+                    secondaryText: "text-[9px] font-semibold",
+                    badgeText: "text-[8.5px] px-1 py-0.2",
+                    cellPadding: "p-1",
+                  },
+                  balanced: {
+                    cellHeight: "h-[68px]",
+                    cellMinHeight: "68px",
+                    cellMinWidth: "98px",
+                    primaryText: "text-[11.5px] font-extrabold",
+                    secondaryText: "text-[10px] font-semibold",
+                    badgeText: "text-[9px] px-1.5 py-0.5",
+                    cellPadding: "p-1.5",
+                  },
+                  spacious: {
+                    cellHeight: "h-[86px]",
+                    cellMinHeight: "86px",
+                    cellMinWidth: "118px",
+                    primaryText: "text-xs font-black",
+                    secondaryText: "text-[11px] font-bold",
+                    badgeText: "text-[10px] px-2 py-0.5",
+                    cellPadding: "p-2",
+                  },
+                }[cellDensity];
+
+                const displayedDays = timetableDayFilter !== null ? [timetableDayFilter] : school.days;
+
+                const isEntrySearchMatch = (entry: TimetableEntry) => {
+                  const q = timetableSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  const sub = getSubjectName(entry.subject_id).toLowerCase();
+                  const sec = getSectionName(entry.section_id).toLowerCase();
+                  const tch = getTeacherName(entry.teacher_id).toLowerCase();
+                  return sub.includes(q) || sec.includes(q) || tch.includes(q);
+                };
+
+                const renderTimetableCell = (
+                  entry: TimetableEntry | undefined,
+                  isOff: boolean = false,
+                  secondaryType: "section" | "teacher" = "section",
+                  isDouble: boolean = false,
+                  pairedEntry?: TimetableEntry
+                ) => {
+                  if (!entry) {
+                    if (isOff) {
+                      return (
+                        <div className="w-full h-full rounded-xl bg-rose-50/80 border border-rose-200/90 flex flex-col items-center justify-center text-rose-700 font-extrabold text-[11px] p-1 shadow-2xs">
+                          <span>إجازة رسمية</span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="w-full h-full rounded-xl border border-dashed border-slate-200/90 bg-slate-50/40 flex items-center justify-center text-slate-300 font-bold transition hover:bg-slate-100/70 hover:border-slate-300">
+                        <span className="select-none text-xs">—</span>
+                      </div>
+                    );
+                  }
+
+                  const pal = getCellPalette(entry);
+                  const isChangedCell =
+                    pendingDiff?.changed_cell_keys.has(`${entry.section_id}_${entry.day}_${entry.period}`) ||
+                    (pairedEntry && pendingDiff?.changed_cell_keys.has(`${pairedEntry.section_id}_${pairedEntry.day}_${pairedEntry.period}`));
+                  const isSelectedForSwap =
+                    selectedSwapEntry?.entry_id === entry.entry_id ||
+                    (pairedEntry && selectedSwapEntry?.entry_id === pairedEntry.entry_id);
+                  const isMatch = isEntrySearchMatch(entry) || (pairedEntry && isEntrySearchMatch(pairedEntry));
+                  const subjectName = getSubjectName(entry.subject_id);
+                  const secondaryLabel =
+                    secondaryType === "section"
+                      ? formatSection(getSectionName(entry.section_id))
+                      : getTeacherName(entry.teacher_id);
+
+                  return (
+                    <div
+                      onClick={() => handleCellSwapClick(entry, pairedEntry)}
+                      className={`w-full h-full rounded-xl flex flex-col justify-between transition-all duration-150 cursor-pointer select-none relative border shadow-2xs hover:shadow-md ${
+                        isChangedCell
+                          ? "ring-2 ring-blue-500 border-dashed border-blue-600 motion-safe:animate-pulse"
+                          : isSelectedForSwap
+                          ? "ring-3 ring-amber-500 scale-[1.03] shadow-lg z-20"
+                          : !isMatch && timetableSearch
+                          ? "opacity-30 grayscale-[50%]"
+                          : isMatch && timetableSearch
+                          ? "ring-2 ring-indigo-500 scale-[1.01] shadow-sm z-10"
+                          : "hover:scale-[1.01]"
+                      } ${densityConfig.cellPadding}`}
+                      style={{
+                        backgroundColor: isChangedCell ? "#E0F2FE" : pal.bg,
+                        borderColor: isChangedCell ? "#2563EB" : isSelectedForSwap ? "#D97706" : pal.border,
+                        color: isChangedCell ? "#1E3A8A" : pal.text,
+                      }}
+                      title={
+                        isDouble && pairedEntry
+                          ? `حصة مزدوجة موحدة | ${subjectName} (${DAY_NAMES_AR[entry.day]} ح ${entry.period}-${pairedEntry.period}) - انقر للمبادلة`
+                          : `حصة دراسية | ${subjectName} (${DAY_NAMES_AR[entry.day]} ح ${entry.period}) - انقر للمبادلة`
+                      }
+                    >
+                      {/* Top Header inside cell */}
+                      <div className="flex items-center justify-between w-full gap-1">
+                        <div className="flex items-center gap-1.5 leading-tight font-extrabold truncate">
+                          {isDouble && pairedEntry ? (
+                            <span className={`${densityConfig.primaryText} truncate tracking-tight`}>
+                              {subjectName} <span className="text-[9.5px] font-bold opacity-75">(مزدوجة ح{entry.period}-{pairedEntry.period})</span>
+                            </span>
+                          ) : (
+                            <span className={`${densityConfig.primaryText} truncate`}>{subjectName}</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            togglePinEntry(entry, pairedEntry);
+                          }}
+                          title={
+                            entry.is_pinned
+                              ? "الحصة مثبّتة (انقر لإلغاء التثبيت)"
+                              : "تثبيت الحصة لمنع تغييرها في إعادة التوليد"
+                          }
+                          className="shrink-0 cursor-pointer"
+                        >
+                          {entry.is_pinned ? (
+                            <span className="text-[8.5px] font-black bg-amber-500 text-white px-1 py-0.2 rounded shadow-2xs">
+                              مثبت
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-slate-400 opacity-60 hover:opacity-100 hover:text-slate-700 transition">
+                              تثبيت
+                            </span>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Bottom Footer inside cell */}
+                      <div className="flex items-center justify-between w-full gap-1 mt-auto">
+                        <span
+                          className={`${densityConfig.badgeText} rounded-md font-bold truncate max-w-[75%] border border-black/5`}
+                          style={{
+                            backgroundColor: pal.badgeBg,
+                            color: pal.badgeText,
+                          }}
+                        >
+                          {secondaryLabel}
+                        </span>
+
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          {!isDouble && isDoublePeriod(entry, activeSchedule.entries) && (
+                            <span
+                              className="text-[8.5px] font-black bg-white/95 text-slate-800 px-1 py-0.2 rounded border border-slate-300 shadow-2xs"
+                              title="حصة مزدوجة متصلة"
+                            >
+                              مزدوجة
+                            </span>
+                          )}
+                          {isChangedCell && (
+                            <span className="bg-blue-700 text-white text-[8px] px-1 py-0.2 rounded font-extrabold">
+                              معدل
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                };
+
                 return (
-                  <>
-                    {viewMode === "master" && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs text-slate-500">
-                          <span className="font-bold text-slate-700">
-                            💡 عمود المعلم ثابت على اليمين — توزيع الحصص اليومية والفترات معتمد بنسبة 0% تعارض
+                  <div className={isTimetableFullscreen ? "fixed inset-0 z-50 bg-white p-4 sm:p-6 overflow-auto shadow-2xl flex flex-col space-y-4" : "space-y-4"}>
+                    {/* Fullscreen Header Bar */}
+                    {isTimetableFullscreen && (
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                        <div className="flex items-center gap-2.5">
+                          <h2 className="font-extrabold text-base sm:text-lg text-slate-900">{school.name}</h2>
+                          <span className="bg-blue-100 text-blue-900 text-xs font-extrabold px-2 py-0.5 rounded-lg">
+                            {viewMode === "master" ? "الجدول العام" : viewMode === "section" ? "الفصول" : "المعلمون"}
                           </span>
-                          <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-200">
-                            إجمالي الحصص المجدولة: {activeSchedule.entries.length} حصة (تعارضات: 0%)
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsTimetableFullscreen(false)}
+                          className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <span>✕</span>
+                          <span>إنهاء التكبير</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Master View */}
+                    {viewMode === "master" && (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
+                          <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                            <span>💡</span>
+                            <span>
+                              {masterRowMode === "teachers"
+                                ? "عمود المعلم مثبت · 0% تعارضات"
+                                : "عمود الفصل مثبت · 0% تعارضات"}
+                            </span>
+                          </span>
+                          <span className="bg-blue-50 text-blue-700 font-extrabold px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs">
+                            {activeSchedule.entries.length} حصة مجدولة · خالية من التعارضات
                           </span>
                         </div>
 
-                        <div className="overflow-x-auto border border-slate-300 rounded-xl shadow-xs max-h-[650px]">
-                          <table className="w-full text-[11px] border-collapse bg-white">
+                        <div className="overflow-x-auto border border-slate-300 rounded-2xl shadow-xs max-h-[700px] timetable-scroll w-full">
+                          <table className="w-full text-[11px] border-collapse bg-white" style={{ zoom: `${timetableZoom}%` }}>
                             <thead>
-                              {/* Day Group Row */}
+                              {/* Day Group Header */}
                               <tr className="bg-slate-900 text-white">
                                 <th
                                   rowSpan={2}
-                                  className="sticky start-0 z-30 bg-slate-900 text-white p-2.5 text-start font-extrabold text-xs min-w-[140px] border-b border-e border-slate-700 shadow-[2px_0_6px_rgba(0,0,0,0.18)]"
+                                  className="sticky start-0 z-30 bg-slate-900 text-white p-3 text-start font-extrabold text-xs min-w-[140px] border-b border-e border-slate-700 shadow-[3px_0_8px_rgba(0,0,0,0.18)]"
                                 >
-                                  المعلم / اليوم
+                                  {masterRowMode === "teachers" ? "المعلم / اليوم" : "الفصل / اليوم"}
                                 </th>
-                                {school.days.map((d) => {
+                                {displayedDays.map((d) => {
                                   const dayPeriods = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
                                   return (
                                     <th
@@ -2312,15 +3004,15 @@ export default function App() {
                                   );
                                 })}
                               </tr>
-                              {/* Periods Sub-Header Row */}
+                              {/* Periods Sub-Header */}
                               <tr className="bg-slate-800 text-slate-200">
-                                {school.days.map((d) => {
+                                {displayedDays.map((d) => {
                                   const dayPeriods = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
                                   return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => (
                                     <th
                                       key={`h-${d}-${p}`}
-                                      className="bg-slate-800 text-slate-200 p-1 text-center font-bold text-[10px] border-b border-l border-slate-700 whitespace-nowrap"
-                                      style={{ minWidth: "75px" }}
+                                      className="bg-slate-800 text-slate-200 p-1.5 text-center font-extrabold text-[10.5px] border-b border-l border-slate-700 whitespace-nowrap"
+                                      style={{ minWidth: densityConfig.cellMinWidth }}
                                     >
                                       ح {p}
                                     </th>
@@ -2329,85 +3021,140 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody>
-                              {school.teachers.map((tch) => {
-                                const teacherEntriesCount = activeSchedule.entries.filter((e) => e.teacher_id === tch.id).length;
-                                return (
-                                  <tr key={tch.id} className="hover:bg-slate-50/70 transition-colors">
-                                    <td className="sticky start-0 z-20 bg-white p-2.5 text-start border-b border-e border-slate-300 shadow-[2px_0_6px_rgba(0,0,0,0.06)] min-w-[140px]">
-                                      <div className="font-extrabold text-xs text-slate-900 leading-tight">{tch.name}</div>
-                                      <div className="text-[10px] text-slate-500 font-semibold mt-0.5">
-                                        {teacherEntriesCount} حصة {tch.code ? `| ${tch.code}` : ""}
-                                      </div>
-                                    </td>
-                                    {school.days.map((d) => {
-                                      const dayPeriods = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
-                                      const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
-                                      return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => {
-                                        const entry = activeSchedule.entries.find(
-                                          (e) => e.teacher_id === tch.id && e.day === d && e.period === p
-                                        );
-                                        const pal = entry ? getSectionPalette(entry.section_id) : null;
-                                        const isChangedCell = entry && pendingDiff?.changed_cell_keys.has(`${entry.section_id}_${d}_${p}`);
-                                        return (
-                                          <td
-                                            key={`${tch.id}-${d}-${p}`}
-                                            className="p-1 border-b border-l border-slate-200 text-center align-middle"
-                                            style={{ minWidth: "75px", height: "50px" }}
-                                          >
-                                            {entry ? (
-                                              <div
-                                                className={`w-full h-full rounded-md p-1 flex flex-col justify-center items-center shadow-xs border transition-transform hover:scale-105 relative ${
-                                                  isChangedCell
-                                                    ? "ring-2 ring-blue-500 border-dashed border-blue-600 motion-safe:animate-pulse motion-reduce:animate-none"
-                                                    : ""
-                                                }`}
+                              {masterRowMode === "teachers"
+                                ? school.teachers.map((tch) => {
+                                    const teacherEntriesCount = activeSchedule.entries.filter((e) => e.teacher_id === tch.id).length;
+                                    return (
+                                      <tr key={tch.id} className="hover:bg-slate-50/70 transition-colors">
+                                        <td className="sticky start-0 z-20 bg-white p-2.5 text-start border-b border-e border-slate-300 shadow-[3px_0_8px_rgba(0,0,0,0.06)] min-w-[140px]">
+                                          <div className="font-extrabold text-xs text-slate-900 leading-tight flex items-center gap-1.5">
+                                            <span>👨‍🏫</span>
+                                            <span>{tch.name}</span>
+                                          </div>
+                                          <div className="text-[10px] text-slate-500 font-bold mt-1">
+                                            {teacherEntriesCount} حصة {tch.code ? `· ${tch.code}` : ""}
+                                          </div>
+                                        </td>
+                                        {displayedDays.map((d) => {
+                                          const dayPeriods = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                          const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
+                                          const consumedPeriods = new Set<number>();
+
+                                          return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => {
+                                            if (consumedPeriods.has(p)) return null;
+
+                                            const entry = activeSchedule.entries.find(
+                                              (e) => e.teacher_id === tch.id && e.day === d && e.period === p
+                                            );
+
+                                            let isDoubleStart = false;
+                                            let pairedEntry: TimetableEntry | undefined = undefined;
+
+                                            if (entry && mergeDoublePeriods) {
+                                              const nextP = p + 1;
+                                              if (nextP <= dayPeriods) {
+                                                const next = activeSchedule.entries.find(
+                                                  (e) =>
+                                                    e.teacher_id === tch.id &&
+                                                    e.day === d &&
+                                                    e.period === nextP &&
+                                                    e.section_id === entry.section_id &&
+                                                    e.subject_id === entry.subject_id
+                                                );
+                                                if (next) {
+                                                  isDoubleStart = true;
+                                                  pairedEntry = next;
+                                                  consumedPeriods.add(nextP);
+                                                }
+                                              }
+                                            }
+
+                                            return (
+                                              <td
+                                                key={`${tch.id}-${d}-${p}`}
+                                                colSpan={isDoubleStart ? 2 : 1}
+                                                className="p-1 border-b border-l border-slate-200 text-center align-middle"
                                                 style={{
-                                                  backgroundColor: isChangedCell ? "#E0F2FE" : pal?.bg,
-                                                  borderColor: isChangedCell ? "#2563EB" : pal?.border,
-                                                  color: isChangedCell ? "#1E3A8A" : pal?.text,
+                                                  minWidth: isDoubleStart
+                                                    ? `calc(${densityConfig.cellMinWidth} * 2)`
+                                                    : densityConfig.cellMinWidth,
+                                                  height: densityConfig.cellMinHeight,
                                                 }}
                                               >
-                                                <div className="flex items-center gap-1">
-                                                  <span>{formatSection(getSectionName(entry.section_id))}</span>
-                                                  {isChangedCell && (
-                                                    <span className="bg-blue-700 text-white text-[9px] px-1 py-0.2 rounded font-extrabold" aria-label="حصة معدلة">
-                                                      [معدل]
-                                                    </span>
-                                                  )}
-                                                </div>
-                                                <div className="flex items-center justify-between w-full mt-0.5 gap-0.5">
-                                                  <span className="text-[10px] font-bold leading-tight truncate max-w-full opacity-95">
-                                                    {getSubjectName(entry.subject_id)}
-                                                  </span>
-                                                  <button
-                                                    type="button"
-                                                    onClick={(ev) => {
-                                                      ev.stopPropagation();
-                                                      togglePinEntry(entry);
-                                                    }}
-                                                    title={entry.is_pinned ? "الحصة مثبّتة (انقر لإلغاء التثبيت)" : "تثبيت الحصة لمنع تغييرها في إعادة التوليد"}
-                                                    className="text-[10px] opacity-75 hover:opacity-100 p-0.5"
-                                                  >
-                                                    {entry.is_pinned ? "📌" : "🔓"}
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            ) : isOff ? (
-                                              <div className="w-full h-full rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 font-bold text-sm">
-                                                —
-                                              </div>
-                                            ) : (
-                                              <div className="w-full h-full rounded-md bg-slate-50/60 border border-slate-100 flex items-center justify-center text-slate-300 font-bold text-sm">
-                                                —
-                                              </div>
-                                            )}
-                                          </td>
-                                        );
-                                      });
-                                    })}
-                                  </tr>
-                                );
-                              })}
+                                                {renderTimetableCell(entry, isOff, "section", isDoubleStart, pairedEntry)}
+                                              </td>
+                                            );
+                                          });
+                                        })}
+                                      </tr>
+                                    );
+                                  })
+                                : school.sections.map((sec) => {
+                                    const secEntriesCount = activeSchedule.entries.filter((e) => e.section_id === sec.id).length;
+                                    return (
+                                      <tr key={sec.id} className="hover:bg-slate-50/70 transition-colors">
+                                        <td className="sticky start-0 z-20 bg-white p-2.5 text-start border-b border-e border-slate-300 shadow-[3px_0_8px_rgba(0,0,0,0.06)] min-w-[140px]">
+                                          <div className="font-extrabold text-xs text-slate-900 leading-tight flex items-center gap-1.5">
+                                            <span>🏫</span>
+                                            <span>{formatSection(sec.name)}</span>
+                                          </div>
+                                          <div className="text-[10px] text-slate-500 font-bold mt-1">
+                                            {secEntriesCount} حصة أسبوعياً
+                                          </div>
+                                        </td>
+                                        {displayedDays.map((d) => {
+                                          const dayPeriods = sec.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                          const consumedPeriods = new Set<number>();
+
+                                          return Array.from({ length: dayPeriods }, (_, i) => i + 1).map((p) => {
+                                            if (consumedPeriods.has(p)) return null;
+
+                                            const entry = activeSchedule.entries.find(
+                                              (e) => e.section_id === sec.id && e.day === d && e.period === p
+                                            );
+
+                                            let isDoubleStart = false;
+                                            let pairedEntry: TimetableEntry | undefined = undefined;
+
+                                            if (entry && mergeDoublePeriods) {
+                                              const nextP = p + 1;
+                                              if (nextP <= dayPeriods) {
+                                                const next = activeSchedule.entries.find(
+                                                  (e) =>
+                                                    e.section_id === sec.id &&
+                                                    e.day === d &&
+                                                    e.period === nextP &&
+                                                    e.teacher_id === entry.teacher_id &&
+                                                    e.subject_id === entry.subject_id
+                                                );
+                                                if (next) {
+                                                  isDoubleStart = true;
+                                                  pairedEntry = next;
+                                                  consumedPeriods.add(nextP);
+                                                }
+                                              }
+                                            }
+
+                                            return (
+                                              <td
+                                                key={`${sec.id}-${d}-${p}`}
+                                                colSpan={isDoubleStart ? 2 : 1}
+                                                className="p-1 border-b border-l border-slate-200 text-center align-middle"
+                                                style={{
+                                                  minWidth: isDoubleStart
+                                                    ? `calc(${densityConfig.cellMinWidth} * 2)`
+                                                    : densityConfig.cellMinWidth,
+                                                  height: densityConfig.cellMinHeight,
+                                                }}
+                                              >
+                                                {renderTimetableCell(entry, false, "teacher", isDoubleStart, pairedEntry)}
+                                              </td>
+                                            );
+                                          });
+                                        })}
+                                      </tr>
+                                    );
+                                  })}
                             </tbody>
                           </table>
                         </div>
@@ -2417,21 +3164,23 @@ export default function App() {
                     {/* Section Timetable View */}
                     {viewMode === "section" && (
                       <div className="space-y-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-slate-700">اختر الفصل:</span>
+                            <span className="text-xs font-black text-slate-800">اختر الفصل:</span>
                             <select
                               value={selectedSectionId}
                               onChange={(e) => setSelectedSectionId(e.target.value)}
-                              className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold bg-white"
+                              className="border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-extrabold bg-white shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                             >
                               {school.sections.map((s) => (
-                                <option key={s.id} value={s.id}>{s.name}</option>
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
+                                </option>
                               ))}
                             </select>
                           </div>
-                          <span className="text-xs font-bold text-slate-600">
-                            جدول حصص أسبوعي متكامل للفصل المحدد
+                          <span className="text-xs font-extrabold text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                            جدول الفصل ({formatSection(getSectionName(selectedSectionId))})
                           </span>
                         </div>
 
@@ -2439,81 +3188,133 @@ export default function App() {
                           const sec = school.sections.find((s) => s.id === selectedSectionId) || school.sections[0];
                           if (!sec) return null;
                           const maxP = Math.max(
-                            ...school.days.map((d) => sec.daily_period_limits?.[String(d)] ?? school.periods_per_day)
+                            ...displayedDays.map((d) => sec.daily_period_limits?.[String(d)] ?? school.periods_per_day)
                           );
+
+                          // Build section subject summary
+                          const secEntries = activeSchedule.entries.filter((e) => e.section_id === sec.id);
+                          const subjectCounts: Record<string, number> = {};
+                          for (const e of secEntries) {
+                            subjectCounts[e.subject_id] = (subjectCounts[e.subject_id] || 0) + 1;
+                          }
+                          const summaryList = Object.entries(subjectCounts).map(([subId, cnt]) => ({
+                            subId,
+                            subName: getSubjectName(subId),
+                            count: cnt,
+                          }));
+
                           return (
-                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                              <table className="w-full text-xs border-collapse">
-                                <thead>
-                                  <tr className="bg-slate-900 text-white">
-                                    <th className="p-2.5 text-start font-extrabold w-28 border">اليوم / الحصة</th>
-                                    {Array.from({ length: maxP }, (_, i) => i + 1).map((p) => (
-                                      <th key={p} className="p-2 text-center font-extrabold border">الحصة {p}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {school.days.map((d) => {
-                                    const limit = sec.daily_period_limits?.[String(d)] ?? school.periods_per_day;
-                                    return (
-                                      <tr key={d} className="border-b">
-                                        <td className="p-3 bg-slate-50 font-extrabold border text-start">{DAY_NAMES_AR[d]}</td>
-                                        {Array.from({ length: maxP }, (_, i) => i + 1).map((p) => {
-                                          if (p > limit) {
+                            <div className="space-y-4">
+                              <div className="overflow-x-auto border border-slate-300 rounded-2xl shadow-xs timetable-scroll w-full">
+                                <table className="w-full text-xs border-collapse bg-white" style={{ zoom: `${timetableZoom}%` }}>
+                                  <thead>
+                                    <tr className="bg-slate-900 text-white">
+                                      <th className="p-3 text-start font-extrabold w-28 sm:w-32 border-b border-e border-slate-700">اليوم / الحصة</th>
+                                      {Array.from({ length: maxP }, (_, i) => i + 1).map((p) => (
+                                        <th key={p} className="p-2 text-center font-extrabold border-b border-l border-slate-700">
+                                          الحصة {p}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {displayedDays.map((d) => {
+                                      const limit = sec.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                      const consumedPeriods = new Set<number>();
+
+                                      return (
+                                        <tr key={d} className="border-b hover:bg-slate-50/50 transition-colors">
+                                          <td className="p-3 bg-slate-50 font-black border-e border-slate-300 text-start text-slate-800">
+                                            {DAY_NAMES_AR[d]}
+                                          </td>
+                                          {Array.from({ length: maxP }, (_, i) => i + 1).map((p) => {
+                                            if (consumedPeriods.has(p)) return null;
+
+                                            if (p > limit) {
+                                              return (
+                                                <td key={p} className="p-1.5 border-l border-slate-200 text-center bg-slate-100/60 text-slate-400 font-bold">
+                                                  —
+                                                </td>
+                                              );
+                                            }
+                                            const entry = activeSchedule.entries.find(
+                                              (e) => e.section_id === sec.id && e.day === d && e.period === p
+                                            );
+
+                                            let isDoubleStart = false;
+                                            let pairedEntry: TimetableEntry | undefined = undefined;
+
+                                            if (entry && mergeDoublePeriods) {
+                                              const nextP = p + 1;
+                                              if (nextP <= limit) {
+                                                const next = activeSchedule.entries.find(
+                                                  (e) =>
+                                                    e.section_id === sec.id &&
+                                                    e.day === d &&
+                                                    e.period === nextP &&
+                                                    e.teacher_id === entry.teacher_id &&
+                                                    e.subject_id === entry.subject_id
+                                                );
+                                                if (next) {
+                                                  isDoubleStart = true;
+                                                  pairedEntry = next;
+                                                  consumedPeriods.add(nextP);
+                                                }
+                                              }
+                                            }
+
                                             return (
-                                              <td key={p} className="p-2 border text-center bg-slate-100 text-slate-400 font-bold">
-                                                —
+                                              <td
+                                                key={p}
+                                                colSpan={isDoubleStart ? 2 : 1}
+                                                className="p-1.5 border-l border-slate-200 text-center"
+                                                style={{
+                                                  height: densityConfig.cellMinHeight,
+                                                  minWidth: isDoubleStart
+                                                    ? `calc(${densityConfig.cellMinWidth} * 2)`
+                                                    : densityConfig.cellMinWidth,
+                                                }}
+                                              >
+                                                {renderTimetableCell(entry, false, "teacher", isDoubleStart, pairedEntry)}
                                               </td>
                                             );
-                                          }
-                                          const entry = activeSchedule.entries.find(
-                                            (e) => e.section_id === sec.id && e.day === d && e.period === p
-                                          );
-                                          const isChangedCell = entry && pendingDiff?.changed_cell_keys.has(`${entry.section_id}_${d}_${p}`);
-                                          return (
-                                            <td key={p} className="p-2 border text-center">
-                                              {entry ? (
-                                                <div
-                                                  className={`border rounded-lg p-2 relative ${
-                                                    isChangedCell
-                                                      ? "bg-blue-100 border-dashed border-blue-600 text-blue-950 ring-2 ring-blue-500 motion-safe:animate-pulse motion-reduce:animate-none"
-                                                      : "bg-blue-50 border-blue-200 text-blue-900"
-                                                  }`}
-                                                >
-                                                  <div className="flex items-center justify-between">
-                                                    <span className="font-extrabold text-xs">{getSubjectName(entry.subject_id)}</span>
-                                                    {isChangedCell && (
-                                                      <span className="bg-blue-700 text-white text-[9px] px-1 py-0.2 rounded font-extrabold" aria-label="حصة معدلة">
-                                                        [معدل]
-                                                      </span>
-                                                    )}
-                                                  </div>
-                                                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold mt-1">
-                                                    <span>{getTeacherName(entry.teacher_id)}</span>
-                                                    <button
-                                                      type="button"
-                                                      onClick={(ev) => {
-                                                        ev.stopPropagation();
-                                                        togglePinEntry(entry);
-                                                      }}
-                                                      title={entry.is_pinned ? "الحصة مثبّتة (انقر لإلغاء التثبيت)" : "تثبيت الحصة لمنع تغييرها في إعادة التوليد"}
-                                                      className="text-[10px] opacity-75 hover:opacity-100"
-                                                    >
-                                                      {entry.is_pinned ? "📌" : "🔓"}
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              ) : (
-                                                <span className="text-slate-300 font-bold">—</span>
-                                              )}
-                                            </td>
-                                          );
-                                        })}
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
+                                          })}
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              {/* Section Subjects Summary Strip */}
+                              {summaryList.length > 0 && (
+                                <div className="p-3.5 bg-slate-50/90 rounded-2xl border border-slate-200 space-y-2">
+                                  <div className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                                    <span>📊</span>
+                                    <span>توزيع مواد الفصل:</span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {summaryList.map((item) => {
+                                      const pal = getSubjectPalette(item.subName);
+                                      return (
+                                        <span
+                                          key={item.subId}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border shadow-2xs"
+                                          style={{
+                                            backgroundColor: pal.bg,
+                                            borderColor: pal.border,
+                                            color: pal.text,
+                                          }}
+                                        >
+                                          <span>{pal.icon}</span>
+                                          <span>{item.subName}:</span>
+                                          <span className="font-black tabular-nums">{item.count} حصص</span>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })()}
@@ -2523,21 +3324,23 @@ export default function App() {
                     {/* Teacher Timetable View */}
                     {viewMode === "teacher" && (
                       <div className="space-y-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-slate-700">اختر المعلم:</span>
+                            <span className="text-xs font-black text-slate-800">اختر المعلم:</span>
                             <select
                               value={selectedTeacherId}
                               onChange={(e) => setSelectedTeacherId(e.target.value)}
-                              className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold bg-white"
+                              className="border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-extrabold bg-white shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                             >
                               {school.teachers.map((t) => (
-                                <option key={t.id} value={t.id}>{t.name}</option>
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
+                                </option>
                               ))}
                             </select>
                           </div>
-                          <span className="text-xs font-bold text-slate-600">
-                            جدول الحصص والتفرغات الخاص بالمعلم المحدد
+                          <span className="text-xs font-extrabold text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                            جدول المعلم ({getTeacherName(selectedTeacherId)})
                           </span>
                         </div>
 
@@ -2545,100 +3348,138 @@ export default function App() {
                           const tch = school.teachers.find((t) => t.id === selectedTeacherId) || school.teachers[0];
                           if (!tch) return null;
                           const maxP = Math.max(
-                            ...school.days.map((d) => school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day)
+                            ...displayedDays.map((d) => school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day)
                           );
+
+                          const teacherEntries = activeSchedule.entries.filter((e) => e.teacher_id === tch.id);
+                          const quota = tch.max_weekly_periods || teacherEntries.length;
+                          const completionPct = quota > 0 ? Math.round((teacherEntries.length / quota) * 100) : 100;
+
                           return (
-                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                              <table className="w-full text-xs border-collapse">
-                                <thead>
-                                  <tr className="bg-slate-900 text-white">
-                                    <th className="p-2.5 text-start font-extrabold w-28 border">اليوم / الحصة</th>
-                                    {Array.from({ length: maxP }, (_, i) => i + 1).map((p) => (
-                                      <th key={p} className="p-2 text-center font-extrabold border">الحصة {p}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {school.days.map((d) => {
-                                    const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
-                                    const count = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
-                                    return (
-                                      <tr key={d} className="border-b">
-                                        <td className="p-3 bg-slate-50 font-extrabold border text-start">{DAY_NAMES_AR[d]}</td>
-                                        {isOff ? (
-                                          <td colSpan={maxP} className="p-3 border text-center bg-rose-50 text-rose-600 font-extrabold">
-                                            إجازة تفرغ أسبوعية معتمدة (MANDATORY_OFF)
+                            <div className="space-y-4">
+                              <div className="overflow-x-auto border border-slate-300 rounded-2xl shadow-xs timetable-scroll w-full">
+                                <table className="w-full text-xs border-collapse bg-white" style={{ zoom: `${timetableZoom}%` }}>
+                                  <thead>
+                                    <tr className="bg-slate-900 text-white">
+                                      <th className="p-3 text-start font-extrabold w-28 sm:w-32 border-b border-e border-slate-700">اليوم / الحصة</th>
+                                      {Array.from({ length: maxP }, (_, i) => i + 1).map((p) => (
+                                        <th key={p} className="p-2 text-center font-extrabold border-b border-l border-slate-700">
+                                          الحصة {p}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {displayedDays.map((d) => {
+                                      const isOff = tch.work_pattern?.day_rules?.[String(d)] === "MANDATORY_OFF";
+                                      const count = school.sections[0]?.daily_period_limits?.[String(d)] ?? school.periods_per_day;
+                                      const consumedPeriods = new Set<number>();
+
+                                      return (
+                                        <tr key={d} className="border-b hover:bg-slate-50/50 transition-colors">
+                                          <td className="p-3 bg-slate-50 font-black border-e border-slate-300 text-start text-slate-800">
+                                            {DAY_NAMES_AR[d]}
                                           </td>
-                                        ) : (
-                                          Array.from({ length: maxP }, (_, i) => i + 1).map((p) => {
-                                            if (p > count) {
+                                          {isOff ? (
+                                            <td colSpan={maxP} className="p-3 border-l border-slate-200 text-center bg-rose-50/90 text-rose-700 font-extrabold">
+                                              إجازة تفرغ أسبوعية معتمدة
+                                            </td>
+                                          ) : (
+                                            Array.from({ length: maxP }, (_, i) => i + 1).map((p) => {
+                                              if (consumedPeriods.has(p)) return null;
+
+                                              if (p > count) {
+                                                return (
+                                                  <td key={p} className="p-1.5 border-l border-slate-200 text-center bg-slate-100/60 text-slate-400 font-bold">
+                                                    —
+                                                  </td>
+                                                );
+                                              }
+                                              const entry = activeSchedule.entries.find(
+                                                (e) => e.teacher_id === tch.id && e.day === d && e.period === p
+                                              );
+
+                                              let isDoubleStart = false;
+                                              let pairedEntry: TimetableEntry | undefined = undefined;
+
+                                              if (entry && mergeDoublePeriods) {
+                                                const nextP = p + 1;
+                                                if (nextP <= count) {
+                                                  const next = activeSchedule.entries.find(
+                                                    (e) =>
+                                                      e.teacher_id === tch.id &&
+                                                      e.day === d &&
+                                                      e.period === nextP &&
+                                                      e.section_id === entry.section_id &&
+                                                      e.subject_id === entry.subject_id
+                                                  );
+                                                  if (next) {
+                                                    isDoubleStart = true;
+                                                    pairedEntry = next;
+                                                    consumedPeriods.add(nextP);
+                                                  }
+                                                }
+                                              }
+
                                               return (
-                                                <td key={p} className="p-2 border text-center bg-slate-100 text-slate-400 font-bold">
-                                                  —
+                                                <td
+                                                  key={p}
+                                                  colSpan={isDoubleStart ? 2 : 1}
+                                                  className="p-1.5 border-l border-slate-200 text-center"
+                                                  style={{
+                                                    height: densityConfig.cellMinHeight,
+                                                    minWidth: isDoubleStart
+                                                      ? `calc(${densityConfig.cellMinWidth} * 2)`
+                                                      : densityConfig.cellMinWidth,
+                                                  }}
+                                                >
+                                                  {renderTimetableCell(entry, false, "section", isDoubleStart, pairedEntry)}
                                                 </td>
                                               );
-                                            }
-                                            const entry = activeSchedule.entries.find(
-                                              (e) => e.teacher_id === tch.id && e.day === d && e.period === p
-                                            );
-                                            const pal = entry ? getSectionPalette(entry.section_id) : null;
-                                            const isChangedCell = entry && pendingDiff?.changed_cell_keys.has(`${entry.section_id}_${d}_${p}`);
-                                            return (
-                                              <td key={p} className="p-2 border text-center">
-                                                {entry ? (
-                                                  <div
-                                                    className={`rounded-lg p-2 font-bold shadow-xs border relative ${
-                                                      isChangedCell
-                                                        ? "ring-2 ring-blue-500 border-dashed border-blue-600 motion-safe:animate-pulse motion-reduce:animate-none"
-                                                        : ""
-                                                    }`}
-                                                    style={{
-                                                      backgroundColor: isChangedCell ? "#E0F2FE" : pal?.bg,
-                                                      borderColor: isChangedCell ? "#2563EB" : pal?.border,
-                                                      color: isChangedCell ? "#1E3A8A" : pal?.text,
-                                                    }}
-                                                  >
-                                                    <div className="flex items-center justify-between">
-                                                      <span>{formatSection(getSectionName(entry.section_id))}</span>
-                                                      {isChangedCell && (
-                                                        <span className="bg-blue-700 text-white text-[9px] px-1 py-0.2 rounded font-extrabold" aria-label="حصة معدلة">
-                                                          [معدل]
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                    <div className="flex items-center justify-between text-[10px] opacity-90 mt-1">
-                                                      <span>{getSubjectName(entry.subject_id)}</span>
-                                                      <button
-                                                        type="button"
-                                                        onClick={(ev) => {
-                                                          ev.stopPropagation();
-                                                          togglePinEntry(entry);
-                                                        }}
-                                                        title={entry.is_pinned ? "الحصة مثبّتة (انقر لإلغاء التثبيت)" : "تثبيت الحصة لمنع تغييرها في إعادة التوليد"}
-                                                        className="text-[10px] opacity-75 hover:opacity-100"
-                                                      >
-                                                        {entry.is_pinned ? "📌" : "🔓"}
-                                                      </button>
-                                                    </div>
-                                                  </div>
-                                                ) : (
-                                                  <span className="text-slate-300 font-bold">—</span>
-                                                )}
-                                              </td>
-                                            );
-                                          })
-                                        )}
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
+                                            })
+                                          )}
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              {/* Teacher Workload Summary Card */}
+                              <div className="p-3.5 bg-slate-50/90 rounded-2xl border border-slate-200 space-y-2.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base">👨‍🏫</span>
+                                    <span className="font-extrabold text-sm text-slate-900">{tch.name}</span>
+                                    {tch.code && (
+                                      <span className="text-[11px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-lg border border-slate-200">
+                                        كود: {tch.code}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs font-bold">
+                                    <span className="text-slate-600">النصاب:</span>
+                                    <span className="text-blue-700 font-black tabular-nums">{teacherEntries.length} / {quota} حصة</span>
+                                    <span className="bg-emerald-100 text-emerald-800 text-[11px] font-black px-2 py-0.5 rounded-lg">
+                                      {completionPct}% اكتمال
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Progress Bar */}
+                                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                                  <div
+                                    className="bg-gradient-to-r from-blue-600 to-indigo-600 h-2 rounded-full transition-all duration-300"
+                                    style={{ width: `${Math.min(100, completionPct)}%` }}
+                                  />
+                                </div>
+                              </div>
                             </div>
                           );
                         })()}
                       </div>
                     )}
-                  </>
+                  </div>
                 );
               })()}
             </div>
@@ -2646,31 +3487,82 @@ export default function App() {
         </main>
       </div>
 
-      {/* MOBILE BOTTOM SHEET FOR CHAT (< lg screens) */}
-      <div className="lg:hidden">
-        {!isMobileSheetOpen ? (
-          <div className="fixed bottom-3 inset-x-3 z-40">
+      {/* 3-STAGE FLOATING CHAT BOT (FAB) */}
+      {/* Available on mobile (< lg), and on desktop when chat sidebar is collapsed */}
+      <div className={`transition-all ${isChatCollapsed ? "block" : "lg:hidden"}`}>
+        {chatFabState === "circle" && (
+          <div className="fixed bottom-5 end-5 z-40">
             <button
               type="button"
-              onClick={() => setIsMobileSheetOpen(true)}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs py-3 px-4 rounded-2xl shadow-xl flex items-center justify-between border border-slate-700 transition"
+              onClick={() => setChatFabState("input_bar")}
+              className="w-14 h-14 rounded-full bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-600 hover:from-blue-600 hover:to-indigo-500 text-white shadow-2xl flex items-center justify-center transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer border-2 border-white/90 relative group"
+              title="تحدث مع وكيل الجداول الذكي"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-base">🤖</span>
-                <span>وكيل الجداول الذكي (طلب تعديل بالعامية)</span>
-              </div>
-              <span className="text-[10px] bg-blue-600 text-white px-2.5 py-1 rounded-full font-bold">
-                فتح الشات 💬
-              </span>
+              <span className="text-2xl group-hover:scale-110 transition-transform">🤖</span>
+              <span className="absolute -top-1 -start-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white" />
             </button>
           </div>
-        ) : (
-          <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 transition-opacity">
-            <div className="bg-white rounded-t-3xl shadow-2xl max-h-[85vh] h-[78vh] flex flex-col overflow-hidden border-t border-slate-300">
+        )}
+
+        {chatFabState === "input_bar" && (
+          <div className="fixed bottom-4 inset-x-3 sm:inset-x-auto sm:end-5 sm:w-[480px] z-50 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-300 p-2 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-4 duration-200">
+            <button
+              type="button"
+              onClick={() => setChatFabState("circle")}
+              className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center text-sm font-bold transition shrink-0 cursor-pointer shadow-2xs"
+              title="طي شريط المحادثة"
+            >
+              ✕
+            </button>
+
+            <input
+              ref={chatBarInputRef}
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && chatInput.trim()) {
+                  handleSendChat();
+                  setChatFabState("full_sheet");
+                }
+              }}
+              placeholder="اسأل عن المدرسة والمعلمين أو اطلب تعديلاً..."
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400"
+            />
+
+            <button
+              type="button"
+              onClick={() => {
+                if (chatInput.trim()) {
+                  handleSendChat();
+                  setChatFabState("full_sheet");
+                }
+              }}
+              disabled={loading || !chatInput.trim()}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow-xs"
+            >
+              <span>إرسال</span>
+              <span>🚀</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setChatFabState("full_sheet")}
+              className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center text-sm font-bold transition shrink-0 cursor-pointer shadow-2xs"
+              title="عرض المحادثة بالكامل"
+            >
+              💬
+            </button>
+          </div>
+        )}
+
+        {chatFabState === "full_sheet" && (
+          <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200">
+            <div className="bg-white rounded-t-3xl shadow-2xl max-h-[88vh] h-[82vh] flex flex-col overflow-hidden border-t border-slate-300 w-full sm:max-w-2xl sm:mx-auto">
               <div
-                className="p-2 flex justify-center bg-slate-100 cursor-pointer"
-                onClick={() => setIsMobileSheetOpen(false)}
-                title="إغلاق اللوحة"
+                className="p-2 flex justify-center bg-slate-100 cursor-pointer hover:bg-slate-200 transition"
+                onClick={() => setChatFabState("circle")}
+                title="إغلاق وطي المحادثة"
               >
                 <div className="w-12 h-1.5 bg-slate-400 rounded-full" />
               </div>

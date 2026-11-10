@@ -32,26 +32,33 @@ import {
   sanitizeSecretText,
   validateSchoolDataSchema,
 } from "./apiKeyManager.ts";
+import { isQuestionOrInquiry, answerSchoolQuestion } from "./schoolAssistant.ts";
 
 export const DEFAULT_BACKEND_URL = "";
 
-const AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Role & Identity)
-أنت "وكيل الجداول المدرسية الذكي المستقل (Autonomous School Timetable Agent)".
-مهمتك هي إدارة بيانات المدرسة وإنشاء وتعديل جدول الحصص المدرسية تلقائياً بنسبة 100% وبدون أي تعارض (Zero Hard Conflicts).
+export const AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Role & Identity)
+أنت "وكيل ومستشار الجداول المدرسية الذكي (School Timetable AI Copilot & Consultant)".
+لديك وصول كامل ومباشر إلى كائن المدرسة وهيكل البيانات والمعلمين والأنصبة والجدول الحالي.
+تتفاعل مع المستخدم كشات دردشة ذكي ومرن باللغة العربية، وتفهم جميع اللهجات (المصرية، الخليجية، الفصحى).
 
-# دورة العمل التلقائية الصارمة (The Autonomous 3-Step Pipeline)
-1. تعديل وتحديث وثيقة المدرسة النصية (Markdown .md Document First).
-2. استخراج وتحديث هيكل البيانات الرياضي (SchoolData JSON Sync).
-3. تفعيل أمر الحل التلقائي (should_solve: true).
+# أوضاع العمل التفاعلية (Operational Modes)
+1. وضع الدردشة والإجابة والاستفسارات (Conversational & Q&A Mode):
+   - عندما يسأل المستخدم أي سؤال عن المدرسة، المعلمين، الفصول، الحصص، الإجازات، الجدوى، أو يطلب فحصاً للجدول أو نصيحة، أو يحييك:
+   - أجب بإجابة عربية وافية ودقيقة ومباشرة بناءً على أرقام وبيانات المدرسة والجدول المرفقة.
+   - ضع "should_solve": false، و "applied_changes": [].
 
-# صيغة الإخراج الإلزامية (JSON Response Format Only)
-رد بصيغة JSON فقط بهذا الهيكل الدقيق:
+2. وضع الأوامر والتعديلات (Modification & Scheduling Mode):
+   - عندما يطلب المستخدم تعديلاً صريحاً على الجدول أو المدرسة (مثل إعطاء إجازة، تبديل حصص، تعديل أنصبة، إضافة معلم، أو إنشاء/إعادة حل الجدول):
+   - قم بتحديث وثيقة Markdown وكائن SchoolData، وضع "should_solve": true، واذكر البنود المعدلة في "applied_changes".
+
+# صيغة الإخراج الإلزامية (JSON Response Format)
+رد بصيغة JSON فقط بهذا الهيكل:
 {
-  "reply": "شرح باللغة العربية لما قمت به بالتفصيل والخطوات المنفذة",
-  "updated_markdown": "نص وثيقة المدرسة الكامل والمحدث بصيغة Markdown شاملاً التعديلات الجديدة",
-  "updated_school": { ... SchoolData JSON الكامل والمحدث ... },
-  "should_solve": true,
-  "applied_changes": ["قائمة بالبنود التي تم تعديلها في ملف .md والجدول"]
+  "reply": "الإجابة الوافية أو شرح التعديلات باللغة العربية",
+  "updated_markdown": "نص وثيقة المدرسة المحدث أو null إذا لم يكن هناك تعديل",
+  "updated_school": { ... SchoolData المحدث أو null إذا لم يكن هناك تعديل ... },
+  "should_solve": false,
+  "applied_changes": []
 }`;
 
 export class HybridSchoolService {
@@ -376,48 +383,51 @@ ${text}`,
       // Continue to in-browser deterministic interpreter
     }
 
-    // 2. In-browser deterministic command interpreter
-    const cmd = interpretCommand(message, school, history);
-    if (cmd.understood) {
-      let updatedSchool = school;
-      let updatedMarkdown = markdown || "";
-      let appliedChanges: string[] = [];
-      let shouldSolve = true;
-      let reply = "";
+    // 2. In-browser deterministic command interpreter (for mutations/commands)
+    const isQuery = isQuestionOrInquiry(message);
+    if (!isQuery) {
+      const cmd = interpretCommand(message, school, history);
+      if (cmd.understood) {
+        let updatedSchool = school;
+        let updatedMarkdown = markdown || "";
+        let appliedChanges: string[] = [];
+        let shouldSolve = true;
+        let reply = "";
 
-      if (cmd.new_school_text) {
-        const parsed = parseSchoolText(cmd.new_school_text);
-        updatedSchool = parsed.school;
-        appliedChanges = [
-          `إنشاء مدرسة جديدة باسم "${updatedSchool.name}" (${updatedSchool.sections.length} فصول، ${updatedSchool.teachers.length} معلماً)`,
-        ];
-        updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
-        reply = `تم استيراد مدرسة "${updatedSchool.name}" بنجاح! تم بناء هيكل البيانات المكتمل، وجاري إنشاء الجدول تلقائياً.`;
-      } else if (cmd.solve_only) {
-        shouldSolve = true;
-        appliedChanges = ["إعادة توزيع وإنشاء الجدول المدرسي بالكامل لضمان 0% تعارضات"];
-        reply = `تم استلام طلبك لإنشاء وتوزيع الجدول المدرسي. جاري حل وتوليد الجدول الآن بأعلى دقة رياضية ومؤشر جودة مرتفع.`;
-      } else if (cmd.ops.length > 0) {
-        const resOps = applyOps(school, cmd.ops);
-        updatedSchool = resOps.school;
-        appliedChanges = resOps.changes;
-        updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
-        reply =
-          appliedChanges.length > 0
-            ? `تم تنفيذ التعديل المطلوب بنجاح وتحديث وثيقة المدرسة (.md):\n` +
-              appliedChanges.map((c) => `✓ ${c}`).join("\n") +
-              `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`
-            : `تم استلام طلبك وتحديث بيانات المدرسة وإعادة إنشاء الجدول.`;
+        if (cmd.new_school_text) {
+          const parsed = parseSchoolText(cmd.new_school_text);
+          updatedSchool = parsed.school;
+          appliedChanges = [
+            `إنشاء مدرسة جديدة باسم "${updatedSchool.name}" (${updatedSchool.sections.length} فصول، ${updatedSchool.teachers.length} معلماً)`,
+          ];
+          updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
+          reply = `تم استيراد مدرسة "${updatedSchool.name}" بنجاح! تم بناء هيكل البيانات المكتمل، وجاري إنشاء الجدول تلقائياً.`;
+        } else if (cmd.solve_only) {
+          shouldSolve = true;
+          appliedChanges = ["إعادة توزيع وإنشاء الجدول المدرسي بالكامل لضمان 0% تعارضات"];
+          reply = `تم استلام طلبك لإنشاء وتوزيع الجدول المدرسي. جاري حل وتوليد الجدول الآن بأعلى دقة رياضية ومؤشر جودة مرتفع.`;
+        } else if (cmd.ops.length > 0) {
+          const resOps = applyOps(school, cmd.ops);
+          updatedSchool = resOps.school;
+          appliedChanges = resOps.changes;
+          updatedMarkdown = generateSchoolMarkdown(updatedSchool, appliedChanges);
+          reply =
+            appliedChanges.length > 0
+              ? `تم تنفيذ التعديل المطلوب بنجاح وتحديث وثيقة المدرسة (.md):\n` +
+                appliedChanges.map((c) => `✓ ${c}`).join("\n") +
+                `\nوجاري إعادة بناء وتوزيع الجدول تلقائياً بضمان 0% تعارضات.`
+              : `تم استلام طلبك وتحديث بيانات المدرسة وإعادة إنشاء الجدول.`;
+        }
+
+        return {
+          reply,
+          updated_markdown: updatedMarkdown,
+          updated_school: updatedSchool,
+          should_solve: shouldSolve,
+          applied_changes: appliedChanges,
+          analysis: InBrowserSchoolEngine.analyzeSchool(updatedSchool),
+        };
       }
-
-      return {
-        reply,
-        updated_markdown: updatedMarkdown,
-        updated_school: updatedSchool,
-        should_solve: shouldSolve,
-        applied_changes: appliedChanges,
-        analysis: InBrowserSchoolEngine.analyzeSchool(updatedSchool),
-      };
     }
 
     // 3. Open-ended request -> Try Client-Side BYOK Gemini with Key Rotation & Schema Validation
@@ -454,12 +464,14 @@ ${currentMarkdown}
 \`\`\`json
 ${JSON.stringify(school)}
 \`\`\`
-${schedule ? `حالة الجدول الحالي: حل بنجاح مع مؤشر جودة ${schedule.quality_score}%.` : "لم يتم إنشاء الجدول بعد."}
+${schedule ? `حالة الجدول الحالي: حل بنجاح (${schedule.entries.length} حصة مجدولة، مؤشر جودة ${schedule.quality_score}%، 0 تعارضات).` : "لم يتم إنشاء الجدول بعد."}
 
-طلب المستخدم:
+طلب أو سؤال المستخدم:
 ${message}
 
-المطلوب: نفذ دورة العمل الثلاثية (تحديث Markdown أولاً، ثم تحديث كائن SchoolData، وتفعيل should_solve: true) وأخرج JSON مطابق للصيغة الإلزامية.`,
+المطلوب:
+إذا كان السؤال استفساراً أو طلباً للمعلومات أو محادثة، أجب بإجابة عربية وافية ودقيقة وضع "should_solve": false.
+إذا كان الطلب تعديلاً في الجدول، نفذ التعديل وضع "should_solve": true واذكر التغييرات.`,
             },
           ],
         });
@@ -480,40 +492,41 @@ ${message}
         );
 
         const parsed = JSON.parse(rawText);
-        let validatedSchool: SchoolData = school;
-
-        if (parsed.updated_school) {
-          const check = validateSchoolDataSchema(parsed.updated_school);
-          if (check.valid && check.school) {
-            validatedSchool = check.school;
-          } else {
-            this.onKeyNotice?.(
-              `⚠️ تم تجاهل تعديل غير مكتمل في هيكل البيانات من النموذج (${check.errors[0] || "غير صالح"})؛ تم الاحتفاظ بالبيانات السليمة.`
-            );
-          }
-        }
-
-        const updatedMarkdown =
-          typeof parsed.updated_markdown === "string" && parsed.updated_markdown.trim()
-            ? parsed.updated_markdown
-            : currentMarkdown;
-        const shouldSolve = parsed.should_solve !== undefined ? Boolean(parsed.should_solve) : true;
-        const appliedChanges = Array.isArray(parsed.applied_changes)
-          ? parsed.applied_changes.map(String)
-          : [`تحديث عبر مفتاح ${usedKey.alias} (${usedKey.masked})`];
-
         const noticePrefix = notices.length > 0 ? `${notices.join("\n")}\n\n` : "";
 
-        return {
-          reply:
-            noticePrefix +
-            (parsed.reply || "تم تحديث وثيقة المدرسة وتطبيق القيود وإعادة بناء الجدول تلقائياً."),
-          updated_markdown: updatedMarkdown,
-          updated_school: validatedSchool,
-          should_solve: shouldSolve,
-          applied_changes: appliedChanges,
-          analysis: InBrowserSchoolEngine.analyzeSchool(validatedSchool),
-        };
+        if (parsed.reply) {
+          const isMutation = parsed.should_solve === true && parsed.updated_school;
+          let validatedSchool: SchoolData = school;
+
+          if (isMutation) {
+            const check = validateSchoolDataSchema(parsed.updated_school);
+            if (check.valid && check.school) {
+              validatedSchool = check.school;
+            } else {
+              this.onKeyNotice?.(
+                `⚠️ تم تجاهل تعديل غير مكتمل في هيكل البيانات من النموذج؛ تم الاحتفاظ بالبيانات السليمة.`
+              );
+            }
+          }
+
+          const updatedMarkdown =
+            isMutation && typeof parsed.updated_markdown === "string" && parsed.updated_markdown.trim()
+              ? parsed.updated_markdown
+              : currentMarkdown;
+
+          const appliedChanges = isMutation && Array.isArray(parsed.applied_changes)
+            ? parsed.applied_changes.map(String)
+            : [];
+
+          return {
+            reply: noticePrefix + parsed.reply,
+            updated_markdown: updatedMarkdown,
+            updated_school: isMutation ? validatedSchool : school,
+            should_solve: Boolean(isMutation),
+            applied_changes: appliedChanges,
+            analysis: InBrowserSchoolEngine.analyzeSchool(isMutation ? validatedSchool : school),
+          };
+        }
       } catch (err: unknown) {
         if (err instanceof AllKeysFailedError) {
           fallbackNotice = `\n⚠️ إشعار المفاتيح: ${err.message}`;
@@ -522,23 +535,44 @@ ${message}
             err,
             ApiKeyManager.getKeys().map((k) => k.key)
           );
-          fallbackNotice = `\n⚠️ تعذر الاتصال بـ Gemini (${safeErr.slice(0, 90)}) — تم التحويل تلقائياً إلى المحرك المحلي الحتمي.`;
+          fallbackNotice = `\n⚠️ تعذر الاتصال بـ Gemini (${safeErr.slice(0, 90)}) — تم التحويل تلقائياً إلى المحرك المحلي.`;
         }
       }
     } else if (hasKeys) {
       fallbackNotice =
-        "\n💡 ملاحظة: جميع مفاتيح Gemini المضافة معطّلة حالياً؛ يعمل النظام عبر المحرك المحلي الحتمي.";
+        "\n💡 ملاحظة: جميع مفاتيح Gemini المضافة معطّلة حالياً؛ يعمل النظام عبر المحرك المحلي.";
     }
 
-    // 4. Seamless Deterministic Local Fallback
+    // 4. Seamless Deterministic Local Fallback (Always answers questions with full data access)
+    const localAns = answerSchoolQuestion(
+      message,
+      school,
+      schedule,
+      InBrowserSchoolEngine.analyzeSchool(school),
+      history
+    );
+
+    if (localAns.answered) {
+      return {
+        reply: localAns.reply + fallbackNotice,
+        updated_markdown: currentMarkdown,
+        updated_school: school,
+        should_solve: false,
+        applied_changes: [],
+        analysis: InBrowserSchoolEngine.analyzeSchool(school),
+      };
+    }
+
     return {
       reply:
-        `تم استلام طلبك: "${message}".\nيمكنك طلب إعطاء إجازة لمعلم (مثل: "أعطِ الأستاذ يوسف كمال إجازة يوم الأحد")، أو تثبيت حصص أولى وأخيرة، أو تعديل أنصبة الحصص، أو الضغط على "إنشاء الجدول".` +
+        `أهلاً بك! بخصوص استفسارك عن مدرسة "${school.name}":\n` +
+        `المدرسة تضم ${school.sections.length} فصول و${school.teachers.length} معلماً بإجمالي ${school.assignments.reduce((s, a) => s + a.weekly_periods, 0)} حصة أسبوعياً.\n` +
+        `يمكنك سؤالي عن أنصبة أي معلم، أي يوم إجازة، جداول الفصول، أو طلب أي تعديل وسأنفذه فوراً.` +
         fallbackNotice,
       updated_markdown: currentMarkdown,
       updated_school: school,
-      should_solve: true,
-      applied_changes: ["تحديث الجدول بناءً على التوجيه الأخير (المحرك المحلي الحتمي)"],
+      should_solve: false,
+      applied_changes: [],
       analysis: InBrowserSchoolEngine.analyzeSchool(school),
     };
   }
@@ -561,7 +595,7 @@ ${message}
         const { result: session } = await ApiKeyManager.executeWithRotation(
           async (client) => {
             return await client.live.connect({
-              model: "gemini-2.0-flash-exp",
+              model: "gemini-3.8-live",
               config: {
                 responseModalities: [Modality.AUDIO],
                 speechConfig: {
