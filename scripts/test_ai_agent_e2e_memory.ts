@@ -287,6 +287,21 @@ async function runHumanFirstTimeSimulation() {
   assert.ok(rMulti.applied_changes.some((c) => c.includes("شيماء") && c.includes("لا يعمل في الحصة الأخيرة")));
   passed("16f. What-if advisor + affirmative confirm + recommendation + multi-teacher contrast");
 
+  // 16g. Teacher Fairness Audit & Fair Distribution Execution ("هل التوزيع عادل؟" + "عايز توزيع عادل للمعلمين")
+  const rFairAudit = await browserService.chatWithCopilot("هل التوزيع عادل بين المعلمين؟", school, schedule, "", []);
+  assert.equal(rFairAudit.should_solve, false);
+  assert.ok(
+    rFairAudit.reply.includes("عدالة التوزيع") && rFairAudit.reply.includes("هل تحب أطبّق التوزيع العادل للمعلمين"),
+    `Unexpected fairness audit reply: ${rFairAudit.reply}`
+  );
+  const rFairExec = await browserService.chatWithCopilot("عايز توزيع عادل للمعلمين", school, schedule, "", []);
+  assert.equal(rFairExec.should_solve, true);
+  assert.ok(rFairExec.applied_changes.some((c) => c.includes("التوزيع اليومي المتوازن") || c.includes("موازنة")));
+  const fairSolved = InBrowserSchoolEngine.solveInBrowser(rFairExec.updated_school);
+  assert.equal(fairSolved.validation.is_valid, true);
+  assert.equal(fairSolved.metrics.unplaced_lessons, 0);
+  passed("16g. Teacher fairness audit ('هل التوزيع عادل؟') & balanced distribution execution (0 conflicts)");
+
   // -----------------------------------------------------------------------
   // Part B: Verify Live Server Endpoint Parity (http://localhost:3000)
   // -----------------------------------------------------------------------

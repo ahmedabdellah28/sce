@@ -22,6 +22,7 @@ import {
   getOrderedSchoolDays,
   getSectionDayPeriods,
 } from "../presets/commonPresets.ts";
+import { solveSchool } from "./solver.ts";
 
 export interface ChatMessageRecord {
   role: "user" | "ai";
@@ -408,6 +409,21 @@ export function tryExecuteExtendedAgentAction(
             applied_changes: resOps.changes,
           };
         }
+      }
+    }
+
+    const fairProposal = /هل تحب أطبّق التوزيع العادل للمعلمين/.test(lastAiMsg.text);
+    if (fairProposal && /^(?:ايوه|أيوه|نعم|تمام|ماشي|موافق|اكيد|أكيد|طبعا|طبعاً|نفذ|نفذه|اعملها|طبقه|يلا|اوكي|ok)(?:\s|$)/.test(n)) {
+      const fairRes = applyFairTeacherDistribution(school, "both");
+      if (fairRes.changed) {
+        return {
+          handled: true,
+          reply: fairRes.reply,
+          updated_school: fairRes.school,
+          updated_markdown: generateSchoolMarkdown(fairRes.school, fairRes.changes),
+          should_solve: true,
+          applied_changes: fairRes.changes,
+        };
       }
     }
   }
@@ -1090,7 +1106,7 @@ export function tryExecuteExtendedAgentAction(
         }
       }
 
-      if (allOps.length > 0) {
+        if (allOps.length > 0) {
         const resOps = applyOps(school, allOps);
         if (resOps.changed || resOps.changes.length > 0) {
           const cleanSchool = sanitizePlacementRuleConflicts(resOps.school, allOps);
@@ -1109,6 +1125,37 @@ export function tryExecuteExtendedAgentAction(
         }
       }
     }
+  }
+
+  // 11. Fair / Balanced Teacher Distribution ("عايز توزيع عادل للمعلمين" / "وازن أنصبة المعلمين" / "التوزيع بالتساوي")
+  if (
+    /(?:توزيع\s*عادل|عدال[ةه]\s*(?:التوزيع|المعلمين|الحصص|الانصب[ةه])|بالتساوي\s*(?:علي|بين)\s*المعلمين|(?:وز[ّ]?ع|اعمل|طبق|خلي|عايز|اريد|اضبط|سو|سوي).*(?:توزيع\s*متوازن|توازن|عادل|عدال[ةه]|موازن[ةه])|(?:وازن|موازن[ةه]|ساوي)\s*(?:بين\s*)?(?:انصب[ةه]|حصص|المعلمين))/.test(
+      n
+    )
+  ) {
+    const wantsQuotasOnly = /(?:انصب[ةه]|نصاب|زملاء|التخصص|الماده|ماده)/.test(n) && !/(?:يومي|الايام|تتابع|حصص ورا بعض)/.test(n);
+    const wantsDailyOnly = /(?:يومي|الايام|تتابع|حصص ورا بعض|الحصه الاولي|الاخيره)/.test(n) && !/(?:انصب[ةه]|نصاب|ساوي بين)/.test(n);
+    const mode: "daily" | "quotas" | "both" = wantsQuotasOnly ? "quotas" : wantsDailyOnly ? "daily" : "both";
+    const subjectFilter = resolved.subject;
+    const fairRes = applyFairTeacherDistribution(school, mode, subjectFilter?.id);
+    if (fairRes.changed) {
+      return {
+        handled: true,
+        reply: fairRes.reply,
+        updated_school: fairRes.school,
+        updated_markdown: generateSchoolMarkdown(fairRes.school, fairRes.changes),
+        should_solve: true,
+        applied_changes: fairRes.changes,
+      };
+    }
+    return {
+      handled: true,
+      reply:
+        `✅ توزيع المعلمين في "${school.name}" متوازن بالفعل ضمن الحدود الممكنة دون الإخلال بشروط الإجازات والفصول!\n` +
+        fairRes.reportSummary,
+      should_solve: false,
+      applied_changes: [],
+    };
   }
 
   return null;
@@ -1310,5 +1357,303 @@ export function executeGeminiParsedResponse(
     updated_school: validMutation ? nextSchool : school,
     should_solve: validMutation,
     applied_changes: validMutation && Array.isArray(parsed?.applied_changes) ? parsed.applied_changes.map(String) : [],
+  };
+}
+
+function isVacancyTeacherName(name: string): boolean {
+  const n = normAr(name);
+  return name.includes("شاغر") || /^(?:استاذ\s+)?س\s*\d*(?:\s|$)/.test(n);
+}
+
+/**
+ * Analyzes teacher workload & daily schedule fairness (weekly quotas across subject colleagues,
+ * daily min/max spread across active days, and first/last period balance).
+ */
+export function analyzeTeacherFairness(
+  school: SchoolData,
+  schedule?: Schedule | null
+): {
+  subjectGaps: Array<{ subjectName: string; minTeacher: string; minLoad: number; maxTeacher: string; maxLoad: number; gap: number }>;
+  dailyImbalances: Array<{ teacherName: string; minDayCount: number; maxDayCount: number; spread: number; weekly: number; activeDaysCount: number }>;
+  reportLines: string[];
+} {
+  const orderedDays = getOrderedSchoolDays(school);
+  const teacherWeekly = new Map<string, number>();
+  for (const t of school.teachers) teacherWeekly.set(t.id, 0);
+  for (const a of school.assignments) {
+    teacherWeekly.set(a.teacher_id, (teacherWeekly.get(a.teacher_id) || 0) + a.weekly_periods);
+  }
+
+  // 1. Weekly quota gaps per subject among non-vacant teachers
+  const subjectGaps: Array<{ subjectName: string; minTeacher: string; minLoad: number; maxTeacher: string; maxLoad: number; gap: number }> = [];
+  for (const sub of school.subjects) {
+    const subjTeachers = new Map<string, number>();
+    for (const a of school.assignments) {
+      if (a.subject_id !== sub.id) continue;
+      const t = school.teachers.find((x) => x.id === a.teacher_id);
+      if (!t || isVacancyTeacherName(t.name)) continue;
+      subjTeachers.set(t.id, teacherWeekly.get(t.id) || 0);
+    }
+    if (subjTeachers.size >= 2) {
+      const entries = [...subjTeachers.entries()]
+        .map(([tid, load]) => ({ name: school.teachers.find((x) => x.id === tid)?.name || tid, load }))
+        .sort((a, b) => a.load - b.load);
+      const low = entries[0];
+      const high = entries[entries.length - 1];
+      const gap = high.load - low.load;
+      if (gap >= 3) {
+        subjectGaps.push({
+          subjectName: sub.name,
+          minTeacher: low.name,
+          minLoad: low.load,
+          maxTeacher: high.name,
+          maxLoad: high.load,
+          gap,
+        });
+      }
+    }
+  }
+  subjectGaps.sort((a, b) => b.gap - a.gap);
+
+  // 2. Daily load spread across teacher active working days
+  const dailyImbalances: Array<{ teacherName: string; minDayCount: number; maxDayCount: number; spread: number; weekly: number; activeDaysCount: number }> = [];
+  if (schedule && schedule.entries.length > 0) {
+    for (const t of school.teachers) {
+      if (isVacancyTeacherName(t.name)) continue;
+      const activeDays = orderedDays.filter((d) => t.work_pattern?.day_rules?.[String(d)] !== "MANDATORY_OFF");
+      if (activeDays.length < 2) continue;
+      const counts = activeDays.map(
+        (d) => schedule.entries.filter((e) => e.teacher_id === t.id && e.day === d).length
+      );
+      const weekly = counts.reduce((s, c) => s + c, 0);
+      if (weekly === 0) continue;
+      const minD = Math.min(...counts);
+      const maxD = Math.max(...counts);
+      const spread = maxD - minD;
+      if (spread >= 2 || maxD >= 5) {
+        dailyImbalances.push({
+          teacherName: t.name,
+          minDayCount: minD,
+          maxDayCount: maxD,
+          spread,
+          weekly,
+          activeDaysCount: activeDays.length,
+        });
+      }
+    }
+    dailyImbalances.sort((a, b) => b.spread - a.spread || b.maxDayCount - a.maxDayCount);
+  }
+
+  const reportLines: string[] = [];
+  if (subjectGaps.length > 0) {
+    reportLines.push(
+      "• تفاوت الأنصبة الأسبوعية بين زملاء التخصص:",
+      ...subjectGaps.slice(0, 4).map(
+        (g) => `  - ${g.subjectName}: الأعلى أ/ ${g.maxTeacher} (${g.maxLoad} ح) مقابل الأقل أ/ ${g.minTeacher} (${g.minLoad} ح) [فارق ${g.gap} حصص]`
+      )
+    );
+  } else {
+    reportLines.push("• الأنصبة الأسبوعية بين زملاء كل تخصص متقاربة ولا يوجد تفاوت كبير.");
+  }
+
+  if (dailyImbalances.length > 0) {
+    reportLines.push(
+      "• تباين التوزيع اليومي في الجدول الحالي (أعلى يوم مقابل أقل يوم):",
+      ...dailyImbalances.slice(0, 5).map(
+        (d) => `  - أ/ ${d.teacherName} (${d.weekly}ح على ${d.activeDaysCount} أيام): من ${d.minDayCount} إلى ${d.maxDayCount} حصص يومياً (فارق ${d.spread})`
+      )
+    );
+  } else if (schedule && schedule.entries.length > 0) {
+    reportLines.push("• التوزيع اليومي لحصص المعلمين متقارب (أقصى فارق ≤ 1 حصة بين الأيام).");
+  }
+
+  return { subjectGaps, dailyImbalances, reportLines };
+}
+
+/**
+ * Applies fair teacher distribution across two verified, 0-conflict dimensions:
+ * 1) Rebalancing whole section-subject assignments between colleagues of the same subject when gap >= 4,
+ * 2) Tightening daily max caps & consecutive limits (`max_daily_periods`, `max_consecutive_periods <= 3`,
+ *    `minimize_teacher_gaps: true`) verified via `solveSchool`.
+ */
+export function applyFairTeacherDistribution(
+  school: SchoolData,
+  mode: "daily" | "quotas" | "both",
+  subjectIdFilter?: string
+): {
+  changed: boolean;
+  school: SchoolData;
+  changes: string[];
+  reply: string;
+  reportSummary: string;
+} {
+  let working: SchoolData = JSON.parse(JSON.stringify(school));
+  const changes: string[] = [];
+  const orderedDays = getOrderedSchoolDays(working);
+  const schoolMaxDaily = Math.max(1, working.periods_per_day || 6);
+
+  // Step A: Balance weekly assignments across non-vacant colleagues of the same subject
+  if (mode === "quotas" || mode === "both") {
+    const teacherLoad = (s: SchoolData, tid: string) =>
+      s.assignments.filter((a) => a.teacher_id === tid).reduce((acc, a) => acc + a.weekly_periods, 0);
+
+    const targetSubjects = subjectIdFilter
+      ? working.subjects.filter((sub) => sub.id === subjectIdFilter)
+      : working.subjects;
+
+    for (const sub of targetSubjects) {
+      for (let round = 0; round < 6; round++) {
+        const colleagues = working.teachers.filter(
+          (t) =>
+            !isVacancyTeacherName(t.name) &&
+            working.assignments.some((a) => a.teacher_id === t.id && a.subject_id === sub.id)
+        );
+        if (colleagues.length < 2) break;
+        const sorted = [...colleagues].sort((a, b) => teacherLoad(working, a.id) - teacherLoad(working, b.id));
+        const lowT = sorted[0];
+        const highT = sorted[sorted.length - 1];
+        const lowLoad = teacherLoad(working, lowT.id);
+        const highLoad = teacherLoad(working, highT.id);
+        const gap = highLoad - lowLoad;
+        if (gap < 4) break;
+
+        // Candidate transferable assignment from highT for `sub.id` that shrinks the gap without inverting it badly
+        const candidates = working.assignments
+          .filter((a) => a.teacher_id === highT.id && a.subject_id === sub.id && a.weekly_periods <= gap - 1)
+          .sort((a, b) => a.weekly_periods - b.weekly_periods);
+
+        let movedThisRound = false;
+        for (const asgn of candidates) {
+          const maxWLow = lowT.max_weekly_periods || 24;
+          if (lowLoad + asgn.weekly_periods > maxWLow) continue;
+          const testSchool: SchoolData = {
+            ...working,
+            assignments: working.assignments.map((a) =>
+              a.id === asgn.id ? { ...a, teacher_id: lowT.id } : a
+            ),
+            teachers: working.teachers.map((t) =>
+              t.id === lowT.id && !(t.subject_ids || []).includes(sub.id)
+                ? { ...t, subject_ids: [...(t.subject_ids || []), sub.id] }
+                : t
+            ),
+          };
+          const check = solveSchool(testSchool, { maxTimeMs: 700, polishMs: 120 });
+          if (check.validation.is_valid && check.metrics.unplaced_lessons === 0) {
+            const secName = working.sections.find((s) => s.id === asgn.section_id)?.name || asgn.section_id;
+            working = testSchool;
+            changes.push(
+              `موازنة ${sub.name}: نقل فصل ${secName} (${asgn.weekly_periods} حصة) من أ/ ${highT.name} (${highLoad}←${highLoad - asgn.weekly_periods}) إلى أ/ ${lowT.name} (${lowLoad}←${lowLoad + asgn.weekly_periods})`
+            );
+            movedThisRound = true;
+            break;
+          }
+        }
+        if (!movedThisRound) break;
+      }
+    }
+  }
+
+  // Step B: Fair Daily Spread & Consecutive Load Balance (strict feasibility guard)
+  let dailyBalancedCount = 0;
+  if (mode === "daily" || mode === "both") {
+    const tightCaps = new Map<string, number>();
+    const prevCaps = new Map<string, number | null | undefined>();
+    const prevConsec = new Map<string, number | undefined>();
+
+    working = {
+      ...working,
+      rules: {
+        ...(working.rules || {}),
+        minimize_teacher_gaps: true,
+      },
+      teachers: working.teachers.map((t) => {
+        if (isVacancyTeacherName(t.name)) return t;
+        const w = working.assignments.filter((a) => a.teacher_id === t.id).reduce((s, a) => s + a.weekly_periods, 0);
+        const activeCount = Math.max(
+          1,
+          orderedDays.filter((d) => t.work_pattern?.day_rules?.[String(d)] !== "MANDATORY_OFF").length
+        );
+        if (w <= 0 || activeCount < 2) return t;
+
+        const avgCeil = Math.ceil(w / activeCount);
+        const targetCap = Math.min(
+          t.max_daily_periods || schoolMaxDaily,
+          Math.max(2, avgCeil + (t.force_double_periods ? 1 : 0))
+        );
+        const targetConsec = Math.min(t.max_consecutive_periods || 3, 3);
+        const capImproved = !t.max_daily_periods || targetCap < t.max_daily_periods;
+        const consecImproved = !t.max_consecutive_periods || t.max_consecutive_periods > targetConsec;
+
+        if (capImproved || consecImproved) {
+          prevCaps.set(t.id, t.max_daily_periods);
+          prevConsec.set(t.id, t.max_consecutive_periods);
+          tightCaps.set(t.id, targetCap);
+          dailyBalancedCount++;
+          return {
+            ...t,
+            max_daily_periods: targetCap,
+            max_consecutive_periods: targetConsec,
+            work_pattern: t.work_pattern
+              ? { ...t.work_pattern, minimize_gaps: true }
+              : { day_rules: {}, daily_period_rules: [], placement_rules: [], minimize_gaps: true },
+          };
+        }
+        return t;
+      }),
+    };
+
+    if (dailyBalancedCount > 0) {
+      let check = solveSchool(working, { maxTimeMs: 1200, polishMs: 250 });
+      // Auto-relax by +1 if any tight daily cap blocks feasibility
+      let relaxRound = 0;
+      while ((!check.validation.is_valid || check.metrics.unplaced_lessons > 0) && relaxRound < 3) {
+        relaxRound++;
+        working = {
+          ...working,
+          teachers: working.teachers.map((t) => {
+            const c = tightCaps.get(t.id);
+            if (c === undefined) return t;
+            const nextC = Math.min(prevCaps.get(t.id) || schoolMaxDaily, c + 1);
+            tightCaps.set(t.id, nextC);
+            return { ...t, max_daily_periods: nextC };
+          }),
+        };
+        check = solveSchool(working, { maxTimeMs: 1200, polishMs: 250 });
+      }
+      if (!check.validation.is_valid || check.metrics.unplaced_lessons > 0) {
+        // Safe rollback of daily tightening if external constraints conflict
+        working = {
+          ...working,
+          teachers: working.teachers.map((t) =>
+            prevCaps.has(t.id)
+              ? { ...t, max_daily_periods: prevCaps.get(t.id) ?? undefined, max_consecutive_periods: prevConsec.get(t.id) }
+              : t
+          ),
+        };
+        dailyBalancedCount = 0;
+      } else {
+        changes.push(
+          `ضبط التوزيع اليومي المتوازن لـ ${dailyBalancedCount} معلماً (الحد اليومي متناسب مع النصاب + حد التتابع ≤ 3 + تقليل الفجوات)`
+        );
+      }
+    }
+  }
+
+  const finalCheck = analyzeTeacherFairness(working, solveSchool(working, { maxTimeMs: 1200, polishMs: 300 }).schedule);
+  const reportSummary = finalCheck.reportLines.join("\n");
+
+  if (changes.length === 0) {
+    return { changed: false, school, changes: [], reply: "", reportSummary };
+  }
+
+  return {
+    changed: true,
+    school: working,
+    changes,
+    reply:
+      `⚖️ تم تطبيق **التوزيع العادل والمتوازن للمعلمين** بضمان 0% تعارضات:\n` +
+      changes.map((c) => `✓ ${c}`).join("\n") +
+      `\n\n📊 حالة التوازن بعد الضبط:\n${reportSummary}\n\nوجاري إعادة عرض الجدول المحدّث.`,
+    reportSummary,
   };
 }
