@@ -355,7 +355,7 @@ export function parseUnstructuredArabicSchoolText(rawText: string): {
     const nClean = normAr(clean);
     const isDeficit = /^(?:س\s*\d+|س\s+[\u0600-\u06FF]+|عجز(?:\s+|$))/.test(nClean) || nClean === "س";
     const sanitized = clean.replace(/\(?\s*عجز\s*\)?/g, "").replace(/\s+/g, " ").trim() || clean;
-    const displayName = isDeficit && !sanitized.includes("شاغر") ? `${sanitized} (شاغر)` : sanitized;
+    const displayName = sanitized.replace(/\s*\(?\s*شاغر\s*\)?/g, "").replace(/\s+/g, " ").trim() || clean;
     return { displayName, isDeficit, matchKey: nClean };
   };
 
@@ -366,7 +366,7 @@ export function parseUnstructuredArabicSchoolText(rawText: string): {
     const t: Teacher = {
       id: `TCH_${teacherMap.size + 1}`,
       name: displayName,
-      code: isDeficit ? `شاغر-${displayName.split(" ")[0]}` : displayName.split(" ")[0],
+      code: isDeficit ? displayName.replace(/\s+/g, "-") : displayName.split(" ")[0],
       subject_ids: [],
       max_daily_periods: periodsPerDay,
       max_weekly_periods: 24,

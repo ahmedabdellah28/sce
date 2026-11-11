@@ -180,7 +180,23 @@ export default function App() {
       const stored = localStorage.getItem("AI_STUDIO_SAVED_SCHOOLS_V2");
       if (stored !== null) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed.map((entry: any) =>
+            entry?.school?.teachers
+              ? {
+                  ...entry,
+                  school: {
+                    ...entry.school,
+                    teachers: entry.school.teachers.map((t: any) => ({
+                      ...t,
+                      name: String(t?.name || "").replace(/\s*\(شاغر\)/g, "").trim(),
+                      code: String(t?.code || "").replace(/^شاغر-/, "").trim(),
+                    })),
+                  },
+                }
+              : entry
+          );
+        }
       }
     } catch { }
     const b376 = getBuiltInSchool376();
@@ -3354,20 +3370,6 @@ export default function App() {
                     {/* Master View */}
                     {viewMode === "master" && (
                       <div className="space-y-3">
-                        <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
-                          <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                            <span>💡</span>
-                            <span>
-                              {masterRowMode === "teachers"
-                                ? "عمود المعلم مثبت · 0% تعارضات"
-                                : "عمود الفصل مثبت · 0% تعارضات"}
-                            </span>
-                          </span>
-                          <span className="bg-blue-50 text-blue-700 font-extrabold px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs">
-                            {activeSchedule.entries.length} حصة مجدولة · خالية من التعارضات
-                          </span>
-                        </div>
-
                         <div className="overflow-x-auto border border-slate-300 rounded-2xl shadow-xs max-h-[700px] timetable-scroll w-full">
                           <table className="w-full text-[11px] border-collapse bg-white" style={{ zoom: `${timetableZoom}%` }}>
                             <thead>

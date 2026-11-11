@@ -652,7 +652,7 @@ async function runHumanFirstTimeSimulation() {
         },
         {
           id: "TCH_VAC1",
-          name: "س1 (شاغر)",
+          name: "س1",
           code: "س1",
           subject_ids: ["SUB_MATH"],
           max_daily_periods: 6,

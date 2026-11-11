@@ -29,7 +29,7 @@ export function buildSchoolExtractionPrompt(rawSchoolText: string): string {
    - إذا درّس المعلم الواحد أكثر من مادة (مثل: عربي + دين)، أضف المادتين وكل تكليفاتهما كاملة!
    - إذا ذُكر أن المادة "مزدوجة/دبل" ضع double_period_policy: "DOUBLE_REQUIRED"، وإذا ذُكر "مفردة" ضع "SINGLE_ONLY"، وإلا "FREE".
 7. المعلمون والخانات الشاغرة (teachers): استخرج كل معلم مذكور باسمه:
-   - **مهم جداً — الخانات الشاغرة ("س"، "س1"، "س2"، "س3"، "س عربي"، "س دين"، "س دراسات")**: في المدارس المصرية الحرف "س" (منفرداً أو برقم أو باسم مادة) يعني **خانة شاغرة مؤقتة / احتياج معلم** ويدرّس تلك المادة. احتفظ بكل منها كمعلم مستقل كامل التكليفات وسمّه بوضوح مثل "س1 (شاغر)" أو "س عربي (شاغر)" بدون استخدام كلمة "عجز" ولا تحذفها أو تدمجها أبداً!
+   - **مهم جداً — الخانات المؤقتة ("س"، "س1"، "س2"، "س3"، "س عربي"، "س دين"، "س دراسات")**: في المدارس المصرية الحرف "س" (منفرداً أو برقم أو باسم مادة) يعني **حصة شاغرة / احتياج معلم** ويدرّس تلك المادة. احتفظ بكل منها كمعلم مستقل كامل التكليفات بنفس اسمه المختصر مثل "س1" أو "س عربي" أو "س دراسات" بدون إضافة كلمة "(شاغر)" أو كلمة "عجز" إلى اسمه، ولا تحذفها أو تدمجها أبداً!
    - الإجازات وأيام العمل: سواء ذُكرت كإجازة ("واخد إجازة التلات والاربع والخميس") أو كأيام حضور ("بتيجي سبت واحد واتنين" / "لا يعمل غير الأربعاء" / "متاح حد وتلات فقط")، ضع جميع أيام الغياب في work_pattern.day_rules كـ "MANDATORY_OFF".
    - قواعد الحصص (work_pattern.placement_rules):
      • تجنب الحصة الأولى ("مش بيدخل أولى" / "الغاء الأولى"): { "day": null, "placement_type": "AVOID_FIRST", "n_periods": 1, "is_hard": true, "weight": 100 }
@@ -201,8 +201,12 @@ export function normalizeAiExtractedSchoolJson(candidate: any): any {
                 : [],
             }
           : undefined;
+        const cleanName = String(t?.name || "").replace(/\s*\(?\s*شاغر\s*\)?/g, "").replace(/\s+/g, " ").trim();
+        const cleanCode = String(t?.code || cleanName).replace(/^شاغر-/, "").replace(/\s*\(?\s*شاغر\s*\)?/g, "").trim();
         return {
           ...t,
+          ...(cleanName ? { name: cleanName } : {}),
+          ...(cleanCode ? { code: cleanCode } : {}),
           max_consecutive_periods:
             typeof t?.max_consecutive_periods === "number" && t.max_consecutive_periods > 0
               ? t.max_consecutive_periods
@@ -371,7 +375,9 @@ export function reconcileAiWithDeterministicSchool(
   const aiHasDeficitMarkers = aiSchool.teachers.some(
     (t) => t.name.includes("شاغر") || t.name.includes("عجز") || /(?:^|\s)س\s*(?:\d*|[\u0600-\u06FF]+)/.test(t.name)
   );
-  const detHasDeficitMarkers = detSchool.teachers.some((t) => t.name.includes("شاغر") || t.name.includes("عجز"));
+  const detHasDeficitMarkers = detSchool.teachers.some(
+    (t) => t.name.includes("شاغر") || t.name.includes("عجز") || /^(?:س(?:\s*\d+|\s+[\u0600-\u06FF]+)?)$/.test(t.name.trim())
+  );
 
   const missingStructuralData =
     detSchool.subjects.length > aiSchool.subjects.length ||
