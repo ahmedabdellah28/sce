@@ -47,168 +47,21 @@ import {
   type GeminiFailureInfo,
 } from "./agentMemoryEngine.ts";
 import { runGeminiToolCallingAgent, classifyGeminiError } from "./agentTools.ts";
+import {
+  buildSchoolExtractionPrompt,
+  normalizeAiExtractedSchoolJson,
+  enrichExtractedSchool,
+  reconcileAiWithDeterministicSchool,
+} from "./schoolImportHelper.ts";
+
+export {
+  buildSchoolExtractionPrompt,
+  normalizeAiExtractedSchoolJson,
+  enrichExtractedSchool,
+  reconcileAiWithDeterministicSchool,
+};
 
 export const DEFAULT_BACKEND_URL = "";
-
-export function buildSchoolExtractionPrompt(rawSchoolText: string): string {
-  return `أنت خبير استخراج بيانات الجداول المدرسية. حوّل النص التالي (ولو كان مكتوباً بالعامية أو غير منظم) إلى كائن JSON واحد فقط مطابق بدقة لهيكل SchoolData التالي:
-
-قواعد الاستخراج الإلزامية:
-1. اسم المدرسة (name): استخرج الاسم الدقيق من النص (مثل "مدرسة الجمالية الإعدادية").
-2. أيام الدراسة (days): استخدم ترقيم النظام المعتمد حصراً:
-   - السبت = 6
-   - الأحد = 0
-   - الاثنين = 1
-   - الثلاثاء = 2
-   - الأربعاء = 3
-   - الخميس = 4
-   مثال من السبت للخميس: [6, 0, 1, 2, 3, 4]. من الأحد للخميس: [0, 1, 2, 3, 4].
-3. عدد الحصص اليومية (periods_per_day): العدد الافتراضي الأقصى يومياً. وإذا ذُكر يوم مخفف لصف معين (مثل "أولى إعدادي يوم الخميس 5 حصص فقط") ضع daily_period_limits على هذا الصف وفصوله: { "4": 5 }.
-4. الفصول (sections): كل فصل له id فريد (مثل "SEC_1_1")، وgrade_id يطابق grade.id، وname وcode مثل "1/1".
-5. المواد (subjects): استخرج كل مادة مذكورة باسم واضح وid فريد (مثل "SUB_AR") ولا تنس مادة الدين أو الأنشطة أو المواد الفرعية مثل (عربي2) إن وجدت، وكذلك التعليم العام واللغات (Math, Science, Connect Plus, المستوى الرفيع) والأزهر (القرآن الكريم، الفقه، التفسير، الحديث، التوحيد، النحو، الصرف، البلاغة) والثانوي (العلوم المتكاملة، الفيزياء، الكيمياء، الأحياء، الجيولوجيا، التاريخ، الجغرافيا، الفلسفة، الإحصاء) والابتدائي المطور (اكتشف، القيم، التوكاتسو، المهارات المهنية). إذا درّس المعلم الواحد أكثر من مادة (مثل: عربي + دين)، أضف المادتين وكل تكليفاتهما كاملة!
-6. المعلمون والخانات الشاغرة (teachers): استخرج كل معلم مذكور باسمه:
-   - **مهم جداً — الخانات الشاغرة ("س"، "س1"، "س2"، "س3"، "س دراسات")**: في المدارس المصرية الحرف "س" (سواء منفرداً أو متبوعاً برقم مثل "س1، س2، س3" أو متبوعاً باسم المادة مثل "س عربي، س دين، س دراسات، س رياضيات") يعني **خانة شاغرة / احتياج معلم** ويدرّس تلك المادة. احتفظ بكل منها كمعلم مستقل كامل التكليفات وسمّه بوضوح مثل "س1 (شاغر)"، "س عربي (شاغر)"، "س دين (شاغر)"، "س دراسات (شاغر)" بدون استخدام كلمة "عجز" ولا تحذفها أو تدمجها أبداً!
-   - الإجازات وأيام العمل: سواء ذُكرت كإجازة ("واخد إجازة التلات والاربع والخميس") أو كأيام حضور ("بتيجي سبت واحد واتنين" / "لا يعمل غير الأربعاء")، ضع جميع أيام الغياب في work_pattern.day_rules كـ "MANDATORY_OFF".
-   - حصص متأخرة / أخيرة: أضف في work_pattern.placement_rules: { "day": null, "placement_type": "LAST_N", "n_periods": 2, "is_hard": true }.
-   - تجنب الحصة الأولى ("متتحطش في الأول"): أضف { "day": null, "placement_type": "AVOID_FIRST", "n_periods": 1, "is_hard": true }.
-   - حد حصص يومي ("مينفعش تاخد غير حصتين يوم الاربع"): أضف في work_pattern.daily_period_rules: { "day": 3, "rule_type": "MAX", "count": 2, "is_hard": true, "weight": 10 }.
-   - إذا ذُكر مزدوجة للمعلم ضع force_double_periods: true. إذا ذُكر حد التتابع العام (مثل 3 حصص) ضع max_consecutive_periods على كل معلم.
-7. الإسنادات والملاحظات (assignments) — مهم جداً:
-   - يمكنك وضع section_ids مصفوفة للفصول المتماثلة لنفس المعلم والمادة والعدد:
-     { "teacher_id": "TCH_YASSER", "subject_id": "SUB_COMP", "section_ids": ["SEC_1_1","SEC_1_2","SEC_1_3","SEC_1_4","SEC_2_1","SEC_2_2","SEC_3_1","SEC_3_2"], "weekly_periods": 1 }
-   - انتبه للملاحظات التكميلية مثل "(ملاحظة: فصل 1/1 فاضله 3 حصص دين ممكن نديهم لـ س3)" وقم بإضافة تكليفها حتى يكتمل نصاب كل فصل تماماً ولا تسقط أي مادة مثل الدين أو الأنشطة!
-
-الهيكل المطلوب (JSON فقط):
-{
-  "id": "sch_ai_1",
-  "name": "string",
-  "academic_year": "2025/2026",
-  "days": [6, 0, 1, 2, 3, 4],
-  "periods_per_day": 6,
-  "grades": [{ "id": "G1", "name": "الأول الإعدادي", "code": "G1", "order": 1, "daily_period_limits": {} }],
-  "sections": [{ "id": "SEC_1_1", "grade_id": "G1", "name": "1/1", "code": "1/1", "daily_period_limits": {} }],
-  "subjects": [{ "id": "SUB_1", "name": "عربي", "code": "عربي", "double_period_policy": "FREE" }],
-  "teachers": [{
-    "id": "TCH_1",
-    "name": "string",
-    "code": "string",
-    "subject_ids": ["SUB_1"],
-    "max_daily_periods": 6,
-    "max_weekly_periods": 24,
-    "max_consecutive_periods": 3,
-    "force_double_periods": false,
-    "work_pattern": { "day_rules": {}, "daily_period_rules": [], "placement_rules": [] }
-  }],
-  "availabilities": [],
-  "assignments": [{ "section_ids": ["SEC_1_1"], "subject_id": "SUB_1", "teacher_id": "TCH_1", "weekly_periods": 6 }]
-}
-
-نص بيانات المدرسة:
-${rawSchoolText}`;
-}
-
-export function normalizeAiExtractedSchoolJson(candidate: any): any {
-  if (!candidate || typeof candidate !== "object") return candidate;
-  const allSectionIds: string[] = Array.isArray(candidate.sections)
-    ? candidate.sections.map((sec: any) => String(sec?.id || "")).filter(Boolean)
-    : [];
-
-  const expanded: any[] = [];
-  if (Array.isArray(candidate.assignments)) {
-    let idx = 1;
-    for (const rawAsgn of candidate.assignments) {
-      if (!rawAsgn || typeof rawAsgn !== "object") continue;
-      const wp = Number(rawAsgn.weekly_periods) || 1;
-      let targetSecs: string[] = [];
-      if (Array.isArray(rawAsgn.section_ids)) {
-        targetSecs = rawAsgn.section_ids.map((x: any) => String(x)).filter(Boolean);
-      } else if (rawAsgn.section_id === "ALL") {
-        targetSecs = allSectionIds;
-      } else if (rawAsgn.section_id) {
-        targetSecs = [String(rawAsgn.section_id)];
-      }
-      for (const secId of targetSecs) {
-        expanded.push({
-          id: rawAsgn.id && targetSecs.length === 1 ? String(rawAsgn.id) : `ASG_AI_${idx++}`,
-          section_id: secId,
-          subject_id: String(rawAsgn.subject_id || ""),
-          teacher_id: String(rawAsgn.teacher_id || ""),
-          weekly_periods: wp,
-        });
-      }
-    }
-  }
-
-  return {
-    ...candidate,
-    assignments: expanded,
-  };
-}
-
-export function enrichExtractedSchool(school: SchoolData): SchoolData {
-  const teachersWithSubjects = school.teachers.map((t) => {
-    const inferred = new Set<string>(t.subject_ids || []);
-    for (const a of school.assignments) {
-      if (a.teacher_id === t.id && a.subject_id) inferred.add(a.subject_id);
-    }
-    return {
-      ...t,
-      subject_ids: Array.from(inferred),
-    };
-  });
-  return {
-    ...school,
-    teachers: teachersWithSubjects,
-  };
-}
-
-/**
- * Cross-checks Gemini LLM extraction against our deterministic unstructured Arabic parser.
- * Guarantees Gemini never silently drops deficit teachers ("س1", "س2", "س3", "س دراسات"),
- * subjects (like "دين"), missing note assignments, or teacher off-day/placement constraints.
- */
-export function reconcileAiWithDeterministicSchool(
-  aiSchool: SchoolData,
-  rawText: string
-): { school: SchoolData; notes: string[] } {
-  const det = parseUnstructuredArabicSchoolText(rawText);
-  if (!det) return { school: aiSchool, notes: [] };
-  const detSchool = det.school;
-
-  const aiTotalPeriods = aiSchool.assignments.reduce((s, a) => s + (a.weekly_periods || 0), 0);
-  const detTotalPeriods = detSchool.assignments.reduce((s, a) => s + (a.weekly_periods || 0), 0);
-  const aiOffCount = aiSchool.teachers.reduce(
-    (s, t) => s + Object.values(t.work_pattern?.day_rules || {}).filter((v) => v === "MANDATORY_OFF").length,
-    0
-  );
-  const detOffCount = detSchool.teachers.reduce(
-    (s, t) => s + Object.values(t.work_pattern?.day_rules || {}).filter((v) => v === "MANDATORY_OFF").length,
-    0
-  );
-  const aiHasDeficitMarkers = aiSchool.teachers.some((t) => t.name.includes("شاغر") || t.name.includes("عجز") || /(?:^|\s)س\s*(?:\d*|[\u0600-\u06FF]+)/.test(t.name));
-  const detHasDeficitMarkers = detSchool.teachers.some((t) => t.name.includes("شاغر") || t.name.includes("عجز"));
-
-  const missingSubjectsOrTeachers =
-    detSchool.subjects.length > aiSchool.subjects.length ||
-    detSchool.teachers.length > aiSchool.teachers.length ||
-    detSchool.days.length > aiSchool.days.length ||
-    detTotalPeriods > aiTotalPeriods ||
-    detOffCount > aiOffCount ||
-    (detHasDeficitMarkers && !aiHasDeficitMarkers);
-
-  if (missingSubjectsOrTeachers) {
-    return {
-      school: {
-        ...detSchool,
-        name: aiSchool.name && aiSchool.name.length >= 4 && aiSchool.name !== "مدرسة جديدة" ? aiSchool.name : detSchool.name,
-      },
-      notes: [
-        `تم استكمال البيانات والتأكد من عدم إسقاط أي مادة (مثل الدين) أو الخانات الشاغرة (س1/س2) أو قيود المعلمين (${detSchool.sections.length} فصول، ${detSchool.teachers.length} معلماً، ${detTotalPeriods} حصة).`,
-      ],
-    };
-  }
-  return { school: aiSchool, notes: [] };
-}
 
 export const AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Role & Identity)
 أنت "وكيل ومستشار الجداول المدرسية الذكي (School Timetable AI Copilot & Consultant)".
@@ -363,45 +216,44 @@ export class HybridSchoolService {
    *    and validates the returned SchoolData schema before accepting it.
    * 3. If all keys fail or none are configured, falls back cleanly to the deterministic local parser.
    */
-  async parseRawText(text: string): Promise<{
+  async parseRawText(
+    text: string,
+    options?: { preferAi?: boolean }
+  ): Promise<{
     school: SchoolData;
     normalization_notes: string[];
     unparsed_notes?: string[];
     explanation: string;
     analysis: AnalysisReport;
+    engine_source?: EngineResponseMeta;
   }> {
-    // 1. Server / Local deterministic parser first
+    const hasEnabledKeys = ApiKeyManager.getKeys().some((k) => k.enabled);
+    const hasMarkdownTables = /\|[^\n]+\|/.test(text);
+    const preferAi = options?.preferAi !== false;
+    let serverFailure: GeminiFailureInfo | undefined;
+
+    // 1. Server / Local parser (tries Server Gemini first on freeform prompts)
     try {
       const res = await fetch(`${this.backendUrl}/api/ai/parse`, {
         method: "POST",
         headers: this.getHeaders(),
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          has_client_key: hasEnabledKeys,
+          prefer_ai: preferAi,
+        }),
       });
-      if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
+      if (res.headers.get("content-type")?.includes("application/json")) {
         const data = await res.json();
-        if (!data.needs_client_ai) {
+        if (res.ok && !data.needs_client_ai) {
           return data;
+        }
+        if (data.server_failure) {
+          serverFailure = data.server_failure;
         }
       }
     } catch {
-      // Continue to in-browser deterministic check
-    }
-
-    const parsed = parseSchoolText(text);
-    if (
-      parsed.school &&
-      parsed.school.sections.length > 0 &&
-      parsed.school.teachers.length > 0 &&
-      parsed.school.assignments.length > 0
-    ) {
-      const analysis = InBrowserSchoolEngine.analyzeSchool(parsed.school);
-      return {
-        school: parsed.school,
-        normalization_notes: parsed.parseNotes || [],
-        unparsed_notes: parsed.unparsed_notes || [],
-        explanation: `تم استخراج وتحليل بيانات "${parsed.school.name}" (${parsed.school.sections.length} فصول، ${parsed.school.teachers.length} معلمين، ${parsed.school.assignments.length} تكليفات) محلياً بنجاح.`,
-        analysis,
-      };
+      // Continue to in-browser check
     }
 
     const defaultSchool = getBuiltInSchool376();
@@ -415,11 +267,40 @@ export class HybridSchoolService {
         ],
         explanation: `تم فهم وتحليل بيانات "${defaultSchool.name}" بنجاح.`,
         analysis,
+        engine_source: {
+          source: "local_engine",
+          via: "local_fallback",
+          model_used: "نموذج محفوظ",
+        },
       };
     }
 
-    // 2. Try Client-Side BYOK Gemini with Auto-Rotation & Schema Validation
-    const hasEnabledKeys = ApiKeyManager.getKeys().some((k) => k.enabled);
+    // 2. Deterministic Markdown Table parser ONLY when structured tables exist (avoid bypassing AI on freeform prompts!)
+    const parsed = hasMarkdownTables ? parseSchoolText(text) : null;
+    if (
+      hasMarkdownTables &&
+      parsed?.school &&
+      parsed.school.sections.length > 0 &&
+      parsed.school.teachers.length > 0 &&
+      parsed.school.assignments.length > 0
+    ) {
+      const analysis = InBrowserSchoolEngine.analyzeSchool(parsed.school);
+      return {
+        school: parsed.school,
+        normalization_notes: parsed.parseNotes || [],
+        unparsed_notes: parsed.unparsed_notes || [],
+        explanation: `تم استخراج وتحليل بيانات "${parsed.school.name}" (${parsed.school.sections.length} فصول، ${parsed.school.teachers.length} معلمين، ${parsed.school.assignments.length} تكليفات) بنجاح.`,
+        analysis,
+        engine_source: {
+          source: "local_engine",
+          via: "local_fallback",
+          model_used: "محلل الجداول المنظمة",
+        },
+      };
+    }
+
+    // 3. AI-FIRST PRIORITY: Client-Side BYOK Gemini with Auto-Rotation & Schema Validation
+    let clientFailure: GeminiFailureInfo | undefined = serverFailure;
     if (hasEnabledKeys) {
       try {
         const { result: rawJsonText, usedKey, notices } = await ApiKeyManager.executeWithRotation(
@@ -431,7 +312,7 @@ export class HybridSchoolService {
                 responseMimeType: "application/json",
                 maxOutputTokens: 16384,
                 systemInstruction:
-                  "أنت خبير متخصص في استخراج وبناء بيانات الجداول المدرسية وتحويلها إلى JSON دقيق.",
+                  "أنت خبير متخصص في استخراج وبناء بيانات الجداول المدرسية وتحويلها إلى JSON دقيق يضع كل معلومة وقيد وفترة في مكانها الصحيح.",
               },
             });
             return response.text || "{}";
@@ -439,7 +320,12 @@ export class HybridSchoolService {
           { onNotice: this.onKeyNotice }
         );
 
-        const candidate = normalizeAiExtractedSchoolJson(JSON.parse(rawJsonText));
+        const cleanedJson = String(rawJsonText || "{}")
+          .replace(/```json\s*/gi, "")
+          .replace(/```\s*/g, "")
+          .trim();
+        const jsonMatch = cleanedJson.match(/\{[\s\S]*\}/);
+        const candidate = normalizeAiExtractedSchoolJson(JSON.parse(jsonMatch ? jsonMatch[0] : cleanedJson));
         const validation = validateSchoolDataSchema(candidate);
         if (validation.valid && validation.school) {
           const enriched = enrichExtractedSchool(validation.school);
@@ -449,19 +335,30 @@ export class HybridSchoolService {
           return {
             school: finalSchool,
             normalization_notes: [
-              `تم استخراج هيكل المدرسة والتحقق من صحته عبر مفتاح "${usedKey.alias}" (${usedKey.masked}).`,
+              `تم فهم وتحليل بيانات المدرسة عبر Gemini (${usedKey.alias} · ${usedKey.masked}).`,
               ...reconciled.notes,
               ...notices,
             ],
-            explanation: `تم تحليل بيانات "${finalSchool.name}" بنجاح.`,
+            explanation: `تم فهم وتحليل بيانات "${finalSchool.name}" عبر Gemini AI بنجاح.`,
             analysis,
+            engine_source: {
+              source: "gemini_api",
+              via: "browser_byok",
+              model_used: DEFAULT_GEMINI_MODEL,
+              tool_calls_used: [],
+            },
           };
         } else {
+          clientFailure = classifyGeminiError(
+            new Error(validation.errors[0] || "AI schema invalid"),
+            DEFAULT_GEMINI_MODEL
+          );
           this.onKeyNotice?.(
             `⚠️ مخرجات الذكاء الاصطناعي لم تطابق الهيكل المطلوب (${validation.errors[0] || "غير مكتمل"}). تم التحويل للمحرك المحلي الحتمي.`
           );
         }
       } catch (err: unknown) {
+        clientFailure = classifyGeminiError(err, DEFAULT_GEMINI_MODEL);
         if (err instanceof AllKeysFailedError) {
           this.onKeyNotice?.(err.message);
         } else {
@@ -472,9 +369,11 @@ export class HybridSchoolService {
           console.warn("BYOK Gemini parse fallback:", safeMsg);
         }
       }
+    } else if (!clientFailure) {
+      clientFailure = classifyGeminiError("NO_KEY", DEFAULT_GEMINI_MODEL);
     }
 
-    // 3. Deterministic unstructured Arabic prose fallback (handles human freeform notes offline & on 503!)
+    // 4. Deterministic unstructured Arabic prose fallback (handles freeform notes offline & on API failure)
     const unstructured = parseUnstructuredArabicSchoolText(text);
     if (unstructured) {
       return {
@@ -483,18 +382,41 @@ export class HybridSchoolService {
         unparsed_notes: [],
         explanation: unstructured.notes[0],
         analysis: InBrowserSchoolEngine.analyzeSchool(unstructured.school),
+        engine_source: {
+          source: "local_engine",
+          via: "local_fallback",
+          model_used: "المحرك المحلي",
+          failure: clientFailure,
+        },
       };
     }
 
-    // 4. Final fallback
-    const school =
-      parsed?.school && parsed.school.sections.length > 0 ? parsed.school : getBuiltInSchool376();
+    // 5. Final fallback
+    const fallbackParsed = parsed || parseSchoolText(text);
+    const hasParsedSchool =
+      fallbackParsed?.school &&
+      fallbackParsed.school.sections.length > 0 &&
+      fallbackParsed.school.assignments.length > 0;
+
+    if (!hasParsedSchool && preferAi) {
+      throw new Error(
+        `تعذر تحليل النص واستخراج المدرسة عبر Gemini (${clientFailure?.reason_ar || "الخدمة غير متاحة"})، كما لم يحتوِ النص على جداول أو تكليفات واضحة للمحرك المحلي. يرجى التحقق من مفتاح Gemini API أو صياغة الفصول والمعلمين بوضوح.`
+      );
+    }
+
+    const school = hasParsedSchool ? fallbackParsed.school : getBuiltInSchool376();
     return {
       school,
-      normalization_notes: parsed?.parseNotes || [],
-      unparsed_notes: parsed?.unparsed_notes || [],
+      normalization_notes: fallbackParsed?.parseNotes || [],
+      unparsed_notes: fallbackParsed?.unparsed_notes || [],
       explanation: "تم تحليل البيانات باستخدام المحرك المحلي المدمج.",
       analysis: InBrowserSchoolEngine.analyzeSchool(school),
+      engine_source: {
+        source: "local_engine",
+        via: "local_fallback",
+        model_used: "المحرك المحلي",
+        failure: clientFailure,
+      },
     };
   }
 
@@ -589,10 +511,29 @@ export class HybridSchoolService {
 
     const currentMarkdown = markdown || NESSCHINFO_RAW_TEXT;
 
-    // 2. Fast deterministic path for huge pasted school tables or unstructured prose dumps
+    // 2. Fast deterministic path for huge Markdown tables, OR unstructured prose ONLY when forcing local fallback / offline with no Gemini keys
     if (message.trim().split(/\r?\n/).length >= 5 && message.trim().length >= 150) {
       const hasMarkdownTables = /\|[^\n]+\|/.test(message);
-      if (!hasMarkdownTables) {
+      if (hasMarkdownTables) {
+        const parsedFull = parseSchoolText(message);
+        if (parsedFull.school && parsedFull.school.sections.length >= 2 && parsedFull.school.assignments.length >= 4) {
+          const msgChange = `استيراد مدرسة "${parsedFull.school.name}" (${parsedFull.school.sections.length} فصول، ${parsedFull.school.teachers.length} معلماً)`;
+          return {
+            reply: `✓ تم ${msgChange} بنجاح، وجاري توليد الجدول فوراً.`,
+            updated_markdown: generateSchoolMarkdown(parsedFull.school, [msgChange]),
+            updated_school: parsedFull.school,
+            should_solve: true,
+            applied_changes: [msgChange],
+            analysis: InBrowserSchoolEngine.analyzeSchool(parsedFull.school),
+            engine_source: {
+              source: "local_engine",
+              via: "local_fallback",
+              model_used: "محلل الجداول المنظمة",
+            },
+          };
+        }
+      }
+      if (options?.forceLocalFallback || (!hasEnabledKeys && !options?.requireGeminiFirst)) {
         const unstructuredFull = parseUnstructuredArabicSchoolText(message);
         if (unstructuredFull) {
           return {
@@ -602,31 +543,14 @@ export class HybridSchoolService {
             should_solve: true,
             applied_changes: unstructuredFull.notes,
             analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFull.school),
+            engine_source: {
+              source: "local_engine",
+              via: "local_fallback",
+              model_used: "المحرك المحلي",
+              failure: serverFailure,
+            },
           };
         }
-      }
-      const parsedFull = parseSchoolText(message);
-      if (parsedFull.school && parsedFull.school.sections.length >= 2 && parsedFull.school.assignments.length >= 4) {
-        const msgChange = `استيراد مدرسة "${parsedFull.school.name}" (${parsedFull.school.sections.length} فصول، ${parsedFull.school.teachers.length} معلماً)`;
-        return {
-          reply: `✓ تم ${msgChange} بنجاح، وجاري توليد الجدول فوراً.`,
-          updated_markdown: generateSchoolMarkdown(parsedFull.school, [msgChange]),
-          updated_school: parsedFull.school,
-          should_solve: true,
-          applied_changes: [msgChange],
-          analysis: InBrowserSchoolEngine.analyzeSchool(parsedFull.school),
-        };
-      }
-      const unstructuredFallback = parseUnstructuredArabicSchoolText(message);
-      if (unstructuredFallback) {
-        return {
-          reply: `✓ ${unstructuredFallback.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
-          updated_markdown: generateSchoolMarkdown(unstructuredFallback.school, unstructuredFallback.notes),
-          updated_school: unstructuredFallback.school,
-          should_solve: true,
-          applied_changes: unstructuredFallback.notes,
-          analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFallback.school),
-        };
       }
     }
 
@@ -738,6 +662,34 @@ export class HybridSchoolService {
     };
 
     // 4. Deterministic Local Engine Fallback (works 100% offline with zero keys)
+    if (message.trim().split(/\r?\n/).length >= 5 && message.trim().length >= 150) {
+      const parsedFallback = parseSchoolText(message);
+      if (parsedFallback.school && parsedFallback.school.sections.length >= 2 && parsedFallback.school.assignments.length >= 4) {
+        const msgChange = `استيراد مدرسة "${parsedFallback.school.name}" (${parsedFallback.school.sections.length} فصول، ${parsedFallback.school.teachers.length} معلماً)`;
+        return {
+          reply: `✓ تم ${msgChange} بنجاح، وجاري توليد الجدول فوراً.${fallbackNotice}${disabledKeysNotice}`,
+          updated_markdown: generateSchoolMarkdown(parsedFallback.school, [msgChange]),
+          updated_school: parsedFallback.school,
+          should_solve: true,
+          applied_changes: [msgChange],
+          analysis: InBrowserSchoolEngine.analyzeSchool(parsedFallback.school),
+          engine_source: localMeta,
+        };
+      }
+      const unstructuredFallback = parseUnstructuredArabicSchoolText(message);
+      if (unstructuredFallback) {
+        return {
+          reply: `✓ ${unstructuredFallback.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.${fallbackNotice}${disabledKeysNotice}`,
+          updated_markdown: generateSchoolMarkdown(unstructuredFallback.school, unstructuredFallback.notes),
+          updated_school: unstructuredFallback.school,
+          should_solve: true,
+          applied_changes: unstructuredFallback.notes,
+          analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFallback.school),
+          engine_source: localMeta,
+        };
+      }
+    }
+
     const isQuery = isQuestionOrInquiry(message);
     const ctxMessage = enrichMessageWithMemoryContext(message, school, history);
     if (!isQuery) {

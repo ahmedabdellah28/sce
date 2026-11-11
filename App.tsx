@@ -35,6 +35,7 @@ import { DAY_NAMES_AR, type SchoolData, type Schedule, type AnalysisReport, type
 import {
   DEFAULT_CHAT_WELCOME_MESSAGE,
   type ChatMessageRecord,
+  type EngineResponseMeta,
   type SchoolUndoSnapshot,
   type AgentUiActionType,
 } from "./services/agentMemoryEngine.ts";
@@ -761,6 +762,8 @@ export default function App() {
     try {
       let createdSchool: SchoolData;
       let createdRawText: string;
+      let createdEngineSource: EngineResponseMeta | undefined;
+      let createdNotes: string[] = [];
 
       if (newSchoolType === "preset" && selectedPresetObj) {
         createdSchool = createSchoolFromPreset(selectedPresetObj.id, {
@@ -770,7 +773,9 @@ export default function App() {
         createdRawText = generateSchoolMarkdown(createdSchool);
       } else if (newSchoolType === "ai" && newSchoolAiPrompt.trim()) {
         setStatusMessage("جاري تحليل النص واستخراج بيانات المدرسة بالذكاء الاصطناعي...");
-        const aiRes = await service.parseRawText(newSchoolAiPrompt);
+        const aiRes = await service.parseRawText(newSchoolAiPrompt, { preferAi: true });
+        createdEngineSource = aiRes.engine_source;
+        createdNotes = aiRes.normalization_notes || [];
         const explicitName = newSchoolName.trim();
         const extractedName = aiRes.school?.name && aiRes.school.name !== "مدرسة جديدة" ? aiRes.school.name : "";
         createdSchool = {
@@ -828,7 +833,22 @@ export default function App() {
       setShowAddSchoolModal(false);
       setNewSchoolName("");
       setNewSchoolAiPrompt("");
-      setStatusMessage(`تم إنشاء "${createdSchool.name}" بنجاح (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${createdSchool.assignments.length} تكليف)! يمكنك مراجعة الإسناد أو توليد الجدول مباشرة.`);
+      const isGeminiCreated = createdEngineSource?.source === "gemini_api";
+      const totalWeeklyCreated = createdSchool.assignments.reduce((s, a) => s + (a.weekly_periods || 0), 0);
+      const createdShiftSummary =
+        createdSchool.shift_mode === "TWO_SHIFTS"
+          ? " — نظام فترتين (صباحي + مسائي)"
+          : "";
+      const fallbackHint =
+        newSchoolType === "ai" && !isGeminiCreated && createdEngineSource?.failure?.reason_ar
+          ? ` ⚠️ ملاحظة: ${createdEngineSource.failure.reason_ar} (تم البناء بالمحرك المحلي).`
+          : "";
+
+      setStatusMessage(
+        isGeminiCreated
+          ? `✨ تم تحليل وبناء "${createdSchool.name}" عبر Gemini بنجاح (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${totalWeeklyCreated} حصة${createdShiftSummary})!`
+          : `تم إنشاء "${createdSchool.name}" بنجاح (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${totalWeeklyCreated} حصة${createdShiftSummary})!${fallbackHint}`
+      );
       setActiveTab(createdSchool.assignments.length > 0 ? "constraints" : "wizard");
 
       setUndoStack([]);
@@ -836,7 +856,11 @@ export default function App() {
         DEFAULT_CHAT_WELCOME_MESSAGE,
         {
           role: "ai",
-          text: `تم إنشاء المدرسة الجديدة "${createdSchool.name}" بنجاح! تحتوي على ${createdSchool.sections.length} فصول و ${createdSchool.teachers.length} معلماً. اطلب مني أي تعديل أو اضغط على (إنشاء الجدول الآن).`,
+          text: isGeminiCreated
+            ? `تم فهم وتحليل وبناء "${createdSchool.name}" عبر Gemini AI بنجاح (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${totalWeeklyCreated} حصة${createdShiftSummary}). تم وضع كافة الفترات والأنصبة والإجازات في أماكنها؛ اطلب أي تعديل أو اضغط (إنشاء الجدول الآن).`
+            : `تم إنشاء المدرسة "${createdSchool.name}" (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${totalWeeklyCreated} حصة${createdShiftSummary}).${fallbackHint ? `\n${fallbackHint}` : ""} اطلب مني أي تعديل أو اضغط على (إنشاء الجدول الآن).`,
+          changes: createdNotes.length > 0 ? createdNotes : undefined,
+          engineMeta: createdEngineSource,
         },
       ]);
     } catch (e: any) {

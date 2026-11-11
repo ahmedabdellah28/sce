@@ -10,6 +10,14 @@ import {
   resolveTeacher,
   validateSchoolCapacity,
 } from "./schoolCore.ts";
+import { parseSchoolText } from "./schoolCore.ts";
+import { validateSchoolDataSchema } from "./apiKeyManager.ts";
+import {
+  enrichExtractedSchool,
+  normalizeAiExtractedSchoolJson,
+  reconcileAiWithDeterministicSchool,
+} from "./schoolImportHelper.ts";
+import { parseUnstructuredArabicSchoolText } from "./unstructuredParser.ts";
 import { InBrowserSchoolEngine } from "./localEngine.ts";
 import { tryApplyDailyPeriodsChatCommand } from "../presets/commonPresets.ts";
 import {
@@ -164,6 +172,7 @@ export const AI_TOOL_AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Au
    - للتعديلات المهيكلة (إجازات، قواعد الحصص، أولى/أخيرة، منع حصة مثل "الغاء الحصة الاولى"، حد يومي/تتابع، مزدوج/فردي، إسناد، إضافة/حذف/تبديل معلم أو فصل أو مادة، اسم المدرسة): استدعِ \`apply_school_modifications\` بالأوبس المناسبة.
    - للتثبيت أو التبديل أو النقل بين الخلايا أو الحذف/النصيب بصفوف أو تعديل عدد حصص صف يوم معين أو التراجع: استدعِ \`run_domain_command\` بنص واضح محدد.
    - لطلبات التصدير (PDF / Excel) أو فتح شاشة معينة: استدعِ \`trigger_app_action\`. ولا تستدعِ \`trigger_solve\` أبداً في الاستفسارات أو تغيير اسم المدرسة أو التعديلات البسيطة إلا إذا طلب المستخدم صراحةً بناء/إعادة توليد الجدول كله.
+   - إذا أرسل المستخدم وصفاً كاملاً أو شبه كامل لمدرسة جديدة (صفوف، فصول، فترات صباحية/مسائية، معلمون، مواد، أنصبة، شواغر، إجازات، قيود) — حتى لو كان بالعامية أو غير منظم — **يجب استدعاء import_school_from_text أولاً** وتمرير هيكل school_data_json المستخرج بعناية شاملة (أو النص لاستكماله) بحيث تضع كل معلومة في مكانها الصحيح (shift_mode, shifts, grades, sections, daily_period_limits, subjects, teachers, work_pattern, assignments)، ثم مراجعة الملخص العائد وتكملة أي قيد إضافي عبر apply_school_modifications.
 4. للطلبات الغامضة جداً التي قد تغير عشرات الحصص دون تحديد (مثل "ثبت حصة العربي" دون فصل أو يوم أو معلم، أو "انقل حصة" دون تحديد أي حصة): لا تنفذ تعديلاً؛ اسأل المستخدم سؤالاً توضيحياً قصيراً محدداً بالخيارات المتاحة من بيانات المدرسة.
 5. في الصياغات العربية انتبه للنفي دائماً:
    - "الغاء/منع/عدم/إعفاء الحصة الأولى يوم X" تعني \`AVOID_FIRST\` (وليس \`FIRST_N\`).
@@ -334,6 +343,25 @@ export const AGENT_TOOL_DECLARATIONS: FunctionDeclaration[] = [
     },
   },
   {
+    name: "import_school_from_text",
+    description:
+      "إنشاء أو استبدال بيانات المدرسة كاملة انطلاقاً من وصف نصي (عامية أو فصحى) أو هيكل JSON مستخرج بذكاء: يدعم الفترات الصباحية/المسائية (TWO_SHIFTS)، حدود الحصص اليومية (daily_period_limits)، الصفوف والفصول، المواد، المعلمين، الخانات الشاغرة (س1/س عربي)، الإجازات، وقواعد التتابع والأولى/الأخيرة.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        school_data_json: {
+          type: Type.STRING,
+          description:
+            "اختياري (مفضل عند استخراج مدرسة من وصف عامي/حر): سلسلة JSON صالحة لهيكل SchoolData تحتوي name, days, periods_per_day, shift_mode, shifts, grades, sections, subjects, teachers, assignments",
+        },
+        raw_text: {
+          type: Type.STRING,
+          description: "النص الأصلي لوصف المدرسة للتحقق والتدقيق المتقاطع (يُستخدم نص رسالة المستخدم تلقائياً عند تركه فارغاً).",
+        },
+      },
+    },
+  },
+  {
     name: "trigger_app_action",
     description: "توجيه واجهة التطبيق لتنفيذ إجراء مباشر مثل تصدير PDF/Excel، تغيير العرض، إعادة توليد الجدول، أو التراجع.",
     parameters: {
@@ -422,7 +450,7 @@ export async function runGeminiToolCallingAgent(params: {
   generateTurn: GeminiTurnGenerator;
   maxSteps?: number;
 }): Promise<ToolAgentExecutionResult> {
-  const { message, history = [], generateTurn, maxSteps = 5 } = params;
+  const { message, history = [], generateTurn, maxSteps = 6 } = params;
   let workingSchool: SchoolData = JSON.parse(JSON.stringify(params.school));
   let workingMarkdown = params.markdown || generateSchoolMarkdown(workingSchool);
   let workingSchedule: Schedule | null = params.schedule ? JSON.parse(JSON.stringify(params.schedule)) : null;
@@ -783,6 +811,99 @@ ${message}`,
             };
           }
           return { ok: false, error: "لم يتطابق الأمر مع أمر محلي جاهز، استخدم apply_school_modifications أو اسأل المستخدم توضيحاً." };
+        }
+
+        case "import_school_from_text": {
+          const rawText = String(args.raw_text || message || "").trim();
+          let rawCandidate: unknown = args.school_data ?? null;
+          if (!rawCandidate && typeof args.school_data_json === "string" && args.school_data_json.trim()) {
+            const cleaned = args.school_data_json
+              .replace(/```json\s*/gi, "")
+              .replace(/```\s*/g, "")
+              .trim();
+            const match = cleaned.match(/\{[\s\S]*\}/);
+            if (match) {
+              rawCandidate = JSON.parse(match[0]);
+            }
+          }
+
+          if (rawCandidate && typeof rawCandidate === "object") {
+            const normalized = normalizeAiExtractedSchoolJson(rawCandidate);
+            const validation = validateSchoolDataSchema(normalized);
+            if (validation.valid && validation.school) {
+              const enriched = enrichExtractedSchool(validation.school);
+              const reconciled = reconcileAiWithDeterministicSchool(enriched, rawText);
+              workingSchool = reconciled.school;
+              workingSchedule = null;
+              shouldSolve = true;
+              const changeLabel = `بناء وتجهيز مدرسة "${workingSchool.name}" عبر Gemini (${workingSchool.sections.length} فصول، ${workingSchool.teachers.length} معلماً، ${workingSchool.assignments.reduce((s, a) => s + a.weekly_periods, 0)} حصة)`;
+              appliedChanges.push(changeLabel, ...reconciled.notes);
+              workingMarkdown = generateSchoolMarkdown(workingSchool, appliedChanges);
+              return {
+                ok: true,
+                mode: "ai_structured_extraction_and_reconciliation",
+                school_name: workingSchool.name,
+                shift_mode: workingSchool.shift_mode || "SINGLE",
+                first_shift_sections: workingSchool.sections.filter((s) => s.shift !== "SECOND").length,
+                second_shift_sections: workingSchool.sections.filter((s) => s.shift === "SECOND").length,
+                sections_count: workingSchool.sections.length,
+                teachers_count: workingSchool.teachers.length,
+                total_weekly_periods: workingSchool.assignments.reduce((s, a) => s + a.weekly_periods, 0),
+                reconciliation_notes: reconciled.notes,
+                digest: buildLiveAgentContextDigest(workingSchool, null, history),
+                instruction:
+                  "راجع الملخص مقارنةً بنص المستخدم؛ إذا بقي أي قيد أو إجازة أو معلم أو مادة ناقصة استدعِ apply_school_modifications الآن قبل الرد النهائي.",
+              };
+            }
+            const fallbackUnstructured = parseUnstructuredArabicSchoolText(rawText);
+            if (!fallbackUnstructured) {
+              return {
+                ok: false,
+                validation_errors: validation.errors,
+                hint: "هيكل JSON به نقص. أصلح الحقول الناقصة وأعد استدعاء import_school_from_text.",
+              };
+            }
+          }
+
+          const hasTables = /\|[^\n]+\|/.test(rawText);
+          if (hasTables) {
+            const parsedTable = parseSchoolText(rawText);
+            if (parsedTable.school && parsedTable.school.sections.length > 0 && parsedTable.school.assignments.length > 0) {
+              workingSchool = enrichExtractedSchool(parsedTable.school);
+              workingSchedule = null;
+              shouldSolve = true;
+              const changeLabel = `استيراد مدرسة "${workingSchool.name}" من الجداول (${workingSchool.sections.length} فصول، ${workingSchool.teachers.length} معلماً)`;
+              appliedChanges.push(changeLabel);
+              workingMarkdown = generateSchoolMarkdown(workingSchool, appliedChanges);
+              return {
+                ok: true,
+                mode: "markdown_table_parser",
+                digest: buildLiveAgentContextDigest(workingSchool, null, history),
+              };
+            }
+          }
+
+          const unstructured = parseUnstructuredArabicSchoolText(rawText);
+          if (unstructured) {
+            workingSchool = enrichExtractedSchool(unstructured.school);
+            workingSchedule = null;
+            shouldSolve = true;
+            appliedChanges.push(...unstructured.notes);
+            workingMarkdown = generateSchoolMarkdown(workingSchool, appliedChanges);
+            return {
+              ok: true,
+              mode: "unstructured_bootstrap_for_ai_review",
+              notes: unstructured.notes,
+              digest: buildLiveAgentContextDigest(workingSchool, null, history),
+              instruction:
+                "تم استخراج الهيكل الأساسي. راجع كافة تفاصيل نص المستخدم بدقة: إذا وجدت أي فترة إضافية، حد حصص يومي، إجازة معلم، خانة شاغرة، أو قيد موقع لم يظهر في الملخص فاستدعِ apply_school_modifications لإكماله فوراً.",
+            };
+          }
+
+          return {
+            ok: false,
+            error: "النص حر ويتطلب استخراجاً ذكياً متكاملاً. مرّر school_data_json الكامل إلى import_school_from_text.",
+          };
         }
 
         case "trigger_app_action": {

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import type { SchoolData } from "../types.ts";
-import { HybridSchoolService } from "../services/geminiService.ts";
+import {
+  HybridSchoolService,
+  normalizeAiExtractedSchoolJson,
+  reconcileAiWithDeterministicSchool,
+} from "../services/geminiService.ts";
 import { ApiKeyManager } from "../services/apiKeyManager.ts";
 import { getBuiltInSchool376, InBrowserSchoolEngine } from "../services/localEngine.ts";
 import { parseUnstructuredArabicSchoolText } from "../services/unstructuredParser.ts";
@@ -603,6 +607,137 @@ async function runHumanFirstTimeSimulation() {
     assert.equal(forcedRes.engine_source?.source, "local_engine");
     assert.equal(forcedRes.updated_school?.name, "مدرسة الأفق");
     passed("19i. Strict Gemini-First offers API-or-Local choice; forceLocalFallback executes & tags local_engine");
+  }
+
+  // 19j. import_school_from_text tool executes AI-first structured import + reconciliation (TWO_SHIFTS + daily limits + vacancies)
+  {
+    assert.ok(
+      AGENT_TOOL_DECLARATIONS.some((d) => d.name === "import_school_from_text"),
+      "AGENT_TOOL_DECLARATIONS must expose import_school_from_text"
+    );
+    const colloquialTwoShiftPrompt = `دي مدرسة التحدي المشتركة، شغالين فترتين: الصباحي صف أول وتاني من الحد للاربع 7 حصص والخميس 6 حصص، والمسائي صف تالت 8 حصص يومياً.
+صف أول فيه فصلين 1/1 و 1/2.
+أستاذ طارق بيدي عربي 6 حصص في كل فصل وصف أول، بس واخد إجازة الخميس.
+وس1 شاغر بيدي رياضيات 4 حصص في كل فصل.`;
+    let stepIdx19j = 0;
+    const mockAiExtractedJson = JSON.stringify({
+      id: "sch_ai_test",
+      name: "مدرسة التحدي المشتركة",
+      academic_year: "2025/2026",
+      days: [0, 1, 2, 3, 4],
+      periods_per_day: 8,
+      shift_mode: "TWO_SHIFTS",
+      grades: [
+        { id: "G1", name: "الأول", code: "G1", order: 1, daily_period_limits: { "0": 7, "1": 7, "2": 7, "3": 7, "4": 6 } },
+        { id: "G3", name: "الثالث", code: "G3", order: 3, daily_period_limits: {} },
+      ],
+      sections: [
+        { id: "SEC_1_1", grade_id: "G1", name: "1/1", code: "1/1", shift: "FIRST", daily_period_limits: { "0": 7, "1": 7, "2": 7, "3": 7, "4": 6 } },
+        { id: "SEC_1_2", grade_id: "G1", name: "1/2", code: "1/2", shift: "SECOND", daily_period_limits: { "0": 8, "1": 8, "2": 8, "3": 8, "4": 8 } },
+      ],
+      subjects: [
+        { id: "SUB_AR", name: "عربي", code: "عربي", double_period_policy: "FREE" },
+        { id: "SUB_MATH", name: "رياضيات", code: "رياضيات", double_period_policy: "FREE" },
+      ],
+      teachers: [
+        {
+          id: "TCH_TARIQ",
+          name: "أستاذ طارق",
+          code: "طارق",
+          subject_ids: ["SUB_AR"],
+          max_daily_periods: 6,
+          max_weekly_periods: 24,
+          max_consecutive_periods: 6,
+          work_pattern: { day_rules: { "4": "MANDATORY_OFF" }, daily_period_rules: [], placement_rules: [] },
+        },
+        {
+          id: "TCH_VAC1",
+          name: "س1 (شاغر)",
+          code: "س1",
+          subject_ids: ["SUB_MATH"],
+          max_daily_periods: 6,
+          max_weekly_periods: 24,
+          max_consecutive_periods: 6,
+          work_pattern: { day_rules: {}, daily_period_rules: [], placement_rules: [] },
+        },
+      ],
+      availabilities: [],
+      assignments: [
+        { section_ids: ["SEC_1_1", "SEC_1_2"], subject_id: "SUB_AR", teacher_id: "TCH_TARIQ", weekly_periods: 6 },
+        { section_ids: ["SEC_1_1", "SEC_1_2"], subject_id: "SUB_MATH", teacher_id: "TCH_VAC1", weekly_periods: 4 },
+      ],
+    });
+    const res19j = await runGeminiToolCallingAgent({
+      message: colloquialTwoShiftPrompt,
+      school,
+      markdown: "",
+      schedule,
+      history,
+      generateTurn: async () => {
+        stepIdx19j++;
+        if (stepIdx19j === 1) {
+          return {
+            text: "",
+            usedModel: "gemini-3.5-flash",
+            functionCalls: [
+              {
+                id: "call_import_1",
+                name: "import_school_from_text",
+                args: { school_data_json: mockAiExtractedJson, raw_text: colloquialTwoShiftPrompt },
+              },
+            ],
+          };
+        }
+        return { text: "تم فهم وتجهيز مدرسة التحدي المشتركة بنظام الفترتين والقيود بنجاح." };
+      },
+    });
+    assert.equal(res19j.handled, true);
+    assert.equal(res19j.should_solve, true);
+    assert.equal(res19j.updated_school.name, "مدرسة التحدي المشتركة");
+    assert.equal(res19j.updated_school.shift_mode, "TWO_SHIFTS");
+    assert.equal(res19j.updated_school.sections.find((s) => s.id === "SEC_1_2")?.shift, "SECOND");
+    assert.equal(res19j.updated_school.grades.find((g) => g.id === "G1")?.daily_period_limits?.["4"], 6);
+    assert.equal(
+      res19j.updated_school.teachers.find((t) => t.id === "TCH_TARIQ")?.work_pattern?.day_rules?.[4],
+      "MANDATORY_OFF"
+    );
+    assert.ok(res19j.updated_school.teachers.some((t) => t.name.includes("س1")));
+    passed("19j. import_school_from_text tool preserves TWO_SHIFTS, per-day limits, vacancies, and MANDATORY_OFF");
+  }
+
+  // 19k. normalizeAiExtractedSchoolJson + reconcileAiWithDeterministicSchool preserve AI placement rules even when supplemented
+  {
+    const normalized = normalizeAiExtractedSchoolJson({
+      id: "sch_merge_test",
+      name: "مدرسة تجريبية متكاملة",
+      days: [0, 1, 2, 3, 4],
+      periods_per_day: 7,
+      shift_mode: "TWO_SHIFTS",
+      shifts: [
+        { id: "MORNING", name: "صباحي", grade_ids: ["G1"], daily_period_limits: { "4": 6 } },
+        { id: "EVENING", name: "مسائي", grade_ids: ["G2"], daily_period_limits: {} },
+      ],
+      grades: [{ id: "G1", name: "الأول", code: "G1", order: 1 }],
+      sections: [{ id: "SEC_1_1", grade_id: "G1", name: "1/1", code: "1/1" }],
+      subjects: [{ id: "SUB_AR", name: "عربي", code: "عربي" }],
+      teachers: [
+        {
+          id: "TCH_A",
+          name: "أحمد علي",
+          work_pattern: {
+            day_rules: { "4": "MANDATORY_OFF" },
+            placement_rules: [{ day: null, placement_type: "AVOID_FIRST", n_periods: 1, is_hard: true }],
+            daily_period_rules: [],
+          },
+        },
+      ],
+      assignments: [{ section_ids: ["SEC_1_1"], subject_id: "SUB_AR", teacher_id: "TCH_A", weekly_periods: 6 }],
+    });
+    const rec = reconcileAiWithDeterministicSchool(normalized, "مدرسة تجريبية 1/1 أحمد علي عربي 6 حصص");
+    assert.equal(rec.school.shift_mode, "TWO_SHIFTS");
+    assert.equal(rec.school.teachers[0].work_pattern?.placement_rules?.[0]?.placement_type, "AVOID_FIRST");
+    assert.deepEqual(rec.school.teachers[0].subject_ids, ["SUB_AR"]);
+    passed("19k. normalizeAiExtractedSchoolJson & reconcileAiWithDeterministicSchool preserve shifts, rules & subject_ids");
   }
 
   console.log("\nALL_HUMAN_E2E_AGENT_MEMORY_TESTS_PASSED");
