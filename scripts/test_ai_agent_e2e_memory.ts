@@ -9,7 +9,7 @@ import { parseUnstructuredArabicSchoolText } from "../services/unstructuredParse
 import { DEFAULT_CHAT_WELCOME_MESSAGE, type ChatMessageRecord } from "../services/agentMemoryEngine.ts";
 import { getOrderedSchoolDays } from "../presets/commonPresets.ts";
 import { dryRunMinimalChange } from "../services/diffEngine.ts";
-import { runGeminiToolCallingAgent, AGENT_TOOL_DECLARATIONS } from "../services/agentTools.ts";
+import { runGeminiToolCallingAgent, AGENT_TOOL_DECLARATIONS, classifyGeminiError } from "../services/agentTools.ts";
 
 function passed(label: string) {
   console.log(`✅ [E2E PASS] ${label}`);
@@ -560,6 +560,49 @@ async function runHumanFirstTimeSimulation() {
       assert.ok(ali && !oldStill && aliAsgs === s3Count && aliAsgs > 0, `Compound add+replace failed: ${r19g.reply}`);
       passed("19g. Compound add teacher + replace vacancy slot ('اضف معلم علي كمال واستبدل س3 به')");
     }
+  }
+
+  // 19h. Error classification distinguishes Model vs API Request/Key failures
+  {
+    const err503 = classifyGeminiError(new Error('{"error":{"code":503,"status":"UNAVAILABLE"}}'), "gemini-3.8-flash");
+    const err404 = classifyGeminiError(new Error('404 models/gemini-2.5-flash is no longer available'), "gemini-2.5-flash");
+    const err429 = classifyGeminiError(new Error('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}'), "gemini-3.5-flash");
+    const err403 = classifyGeminiError(new Error('403 PERMISSION_DENIED API_KEY_INVALID'), "gemini-3.5-flash");
+    const errNoKey = classifyGeminiError("No Gemini client configured");
+    assert.equal(err503.error_origin, "model");
+    assert.equal(err404.error_origin, "model");
+    assert.equal(err429.error_origin, "api_request");
+    assert.equal(err403.error_origin, "api_request");
+    assert.equal(errNoKey.error_origin, "no_key");
+    passed("19h. Gemini error classifier distinguishes Model errors (503/404) vs API Request/Key errors (429/403)");
+  }
+
+  // 19i. Strict Gemini-First mode returns explicit choice on failure & forceLocalFallback proceeds cleanly
+  {
+    const beforeName = school.name;
+    const strictRes = await browserService.chatWithCopilot(
+      "غير اسم المدرسة إلى مدرسة الأفق",
+      school,
+      schedule,
+      "",
+      history,
+      { requireGeminiFirst: true }
+    );
+    assert.equal(strictRes.needs_api_or_local_choice, true);
+    assert.equal(strictRes.engine_source?.source, "gemini_failed");
+    assert.equal(strictRes.updated_school?.name, beforeName, "Strict mode must NOT silently mutate via local fallback");
+
+    const forcedRes = await browserService.chatWithCopilot(
+      "غير اسم المدرسة إلى مدرسة الأفق",
+      school,
+      schedule,
+      "",
+      history,
+      { forceLocalFallback: true }
+    );
+    assert.equal(forcedRes.engine_source?.source, "local_engine");
+    assert.equal(forcedRes.updated_school?.name, "مدرسة الأفق");
+    passed("19i. Strict Gemini-First offers API-or-Local choice; forceLocalFallback executes & tags local_engine");
   }
 
   console.log("\nALL_HUMAN_E2E_AGENT_MEMORY_TESTS_PASSED");

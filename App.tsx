@@ -960,7 +960,7 @@ export default function App() {
     }
   }
 
-  async function handleSendChat(customPrompt?: string) {
+  async function handleSendChat(customPrompt?: string, chatOpts?: { forceLocalFallback?: boolean }) {
     const msg = (customPrompt ?? chatInput).trim();
     if (!msg) return;
     if (!customPrompt) setChatInput("");
@@ -1004,7 +1004,10 @@ export default function App() {
     setChatLoadingStep(1);
     setLoading(true);
     try {
-      const res = await service.chatWithCopilot(msg, activeSchool, schedule, activeRawText, chatHistory);
+      const res = await service.chatWithCopilot(msg, activeSchool, schedule, activeRawText, chatHistory, {
+        requireGeminiFirst: !chatOpts?.forceLocalFallback,
+        forceLocalFallback: Boolean(chatOpts?.forceLocalFallback),
+      });
       setChatLoadingStep(2);
 
       const mutatedSchool = Boolean(res.updated_school && res.applied_changes && res.applied_changes.length > 0);
@@ -1062,12 +1065,16 @@ export default function App() {
         else if (uiAct === "view_section" && uiTarget) { setActiveTab("timetable"); setViewMode("section"); setSelectedSectionId(uiTarget); }
         else if (uiAct === "view_teacher" && uiTarget) { setActiveTab("timetable"); setViewMode("teacher"); setSelectedTeacherId(uiTarget); }
       }
+      const engineMeta = (res as any).engine_source;
+      const needsChoice = Boolean((res as any).needs_api_or_local_choice);
       setChatHistory((prev) => [
         ...prev,
         {
           role: "ai",
           text: res.reply,
           changes: res.applied_changes,
+          engineMeta,
+          pendingLocalPrompt: needsChoice ? msg : undefined,
           timestamp: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
         },
       ]);
@@ -1475,7 +1482,85 @@ export default function App() {
               )}
             </div>
 
+            {item.role === "ai" && item.engineMeta && (
+              <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                {item.engineMeta.source === "gemini_api" ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#CCFBF1] text-[#0F766E] border border-[#14B8A6]/40">
+                    <span>✨ Gemini API</span>
+                    {item.engineMeta.model_used && (
+                      <span dir="ltr" className="font-mono text-[9.5px] opacity-85">
+                        ({item.engineMeta.model_used})
+                      </span>
+                    )}
+                    <span className="opacity-75">· {item.engineMeta.via === "browser_byok" ? "BYOK" : "Server"}</span>
+                  </span>
+                ) : item.engineMeta.source === "local_engine" ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                    <span>⚙️ المحرك المحلي (أقل دقة)</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300">
+                    <span>
+                      {item.engineMeta.failure?.error_origin === "model"
+                        ? "🤖 خطأ من الموديل نفسه"
+                        : item.engineMeta.failure?.error_origin === "no_key"
+                          ? "🔑 لا يوجد مفتاح API"
+                          : "🔑 خطأ في ريكويست / مفتاح API"}
+                    </span>
+                    {item.engineMeta.failure?.http_status && (
+                      <span dir="ltr" className="font-mono text-[9.5px]">
+                        [{item.engineMeta.failure.http_status}]
+                      </span>
+                    )}
+                  </span>
+                )}
+                {item.engineMeta.source === "gemini_api" &&
+                  Array.isArray(item.engineMeta.tool_calls_used) &&
+                  item.engineMeta.tool_calls_used.length > 0 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#EDE9FE] text-[#6D28D9]">
+                      🛠️ {item.engineMeta.tool_calls_used.length} أداة
+                    </span>
+                  )}
+              </div>
+            )}
+
             <div className="leading-relaxed font-medium">{item.text}</div>
+
+            {item.pendingLocalPrompt && (
+              <div className="mt-2.5 p-2.5 rounded-xl bg-amber-50/90 border border-amber-300 space-y-2">
+                <div className="text-[11px] font-bold text-amber-950 flex flex-wrap items-center gap-1.5">
+                  <span>
+                    {item.engineMeta?.failure?.error_origin === "model"
+                      ? "السبب من الموديل:"
+                      : "السبب من الـ API:"}
+                  </span>
+                  <span className="font-medium">{item.engineMeta?.failure?.reason_ar}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyManagerModal(true)}
+                    className="bg-[#0F766E] hover:bg-[#115E59] text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                  >
+                    🔑 إضافة مفتاح API جديد
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendChat(item.pendingLocalPrompt)}
+                    className="bg-white hover:bg-stone-100 text-[#1C1917] border border-[#D6D3D1] text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                  >
+                    ✨ إعادة المحاولة الآن
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendChat(item.pendingLocalPrompt, { forceLocalFallback: true })}
+                    className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                  >
+                    ⚙️ إكمال محلي (أقل دقة)
+                  </button>
+                </div>
+              </div>
+            )}
 
             {item.changes && item.changes.length > 0 && (
               <div className="mt-2.5 pt-2 border-t border-[#E7E5E4] space-y-1 bg-[#CCFBF1]/35 p-2 rounded-xl border border-[#14B8A6]/40">

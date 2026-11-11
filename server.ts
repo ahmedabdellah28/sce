@@ -43,7 +43,8 @@ import {
   sanitizePlacementRuleConflicts,
   executeGeminiParsedResponse,
 } from "./services/agentMemoryEngine.ts";
-import { runGeminiToolCallingAgent } from "./services/agentTools.ts";
+import { runGeminiToolCallingAgent, classifyGeminiError } from "./services/agentTools.ts";
+import type { EngineResponseMeta, GeminiFailureInfo } from "./services/agentMemoryEngine.ts";
 
 const PORT = 3000;
 const HOST = "0.0.0.0";
@@ -132,6 +133,7 @@ async function generateGeminiContentWithFallback(contents: any, config?: any) {
         return { response, usedModel: m };
       } catch (err: any) {
         lastError = err;
+        if (lastError && typeof lastError === "object") (lastError as any).__modelAttempted = m;
         const msg = String(err?.message || err);
         console.warn(`Attempt with key #${kIdx + 1} model '${m}' failed:`, msg);
         // If this model itself is overloaded/aborted/404, jump straight to next candidate model instead of re-waiting
@@ -393,7 +395,7 @@ app.post("/api/schools/create-template", (req: Request, res: Response) => {
 
 // 4. Hybrid AI-First Tool Calling Agent & Deterministic Local Fallback
 app.post("/api/ai/chat", async (req: Request, res: Response) => {
-  const { message, school, schedule, markdown, history, has_client_key, bypass_ai } = req.body;
+  const { message, school, schedule, markdown, history, has_client_key, bypass_ai, require_gemini, force_local_fallback } = req.body;
   if (!message || !school) {
     return res.status(400).json({ error: "message and school are required" });
   }
@@ -460,15 +462,19 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
   }
 
   // Delegate to Client-Side BYOK Gemini Tool Agent if server has no key while user configured one in browser
-  if (!genAI && has_client_key && !bypass_ai && !loadedLocalFile) {
+  if (!genAI && has_client_key && !bypass_ai && !force_local_fallback && !loadedLocalFile) {
     return res.json({
       understood: false,
       delegate_to_client_gemini: true,
     });
   }
 
+  let serverFailure: GeminiFailureInfo | undefined = !genAI
+    ? classifyGeminiError("No Gemini client configured")
+    : undefined;
+
   // AI-FIRST PRIORITY: Route user message to Gemini Tool-Calling Agent when server Gemini key is active
-  if (genAI && !bypass_ai) {
+  if (genAI && !bypass_ai && !force_local_fallback) {
     try {
       const toolResult = await runGeminiToolCallingAgent({
         message: effectiveMessage,
@@ -477,7 +483,7 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
         schedule: schedule || null,
         history: Array.isArray(history) ? history : [],
         generateTurn: async (contents, config) => {
-          const { response } = await generateGeminiContentWithFallback(contents, {
+          const { response, usedModel } = await generateGeminiContentWithFallback(contents, {
             systemInstruction: config.systemInstruction,
             tools: config.tools,
             maxOutputTokens: config.maxOutputTokens || 4096,
@@ -486,10 +492,17 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
             text: response.text || "",
             functionCalls: response.functionCalls,
             modelContent: response.candidates?.[0]?.content as any,
+            usedModel,
           };
         },
       });
       if (toolResult.handled) {
+        const meta: EngineResponseMeta = {
+          source: "gemini_api",
+          via: "server_api",
+          model_used: toolResult.used_model || geminiModel,
+          tool_calls_used: toolResult.tool_calls_used,
+        };
         return res.json({
           understood: true,
           reply: toolResult.reply,
@@ -502,13 +515,53 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
           ui_target_id: toolResult.ui_target_id,
           tool_calls_used: toolResult.tool_calls_used,
           mode: "gemini_tool_agent",
+          engine_source: meta,
           analysis: InBrowserSchoolEngine.analyzeSchool(toolResult.updated_school),
         });
       }
-    } catch (e) {
-      console.warn("Server Gemini Tool Agent failed, falling back to deterministic engine:", e);
+      serverFailure = toolResult.failure_info || classifyGeminiError("empty response from model", toolResult.used_model);
+    } catch (e: any) {
+      serverFailure = classifyGeminiError(e, e?.__modelAttempted || geminiModel);
+      console.warn("Server Gemini Tool Agent failed:", serverFailure);
     }
   }
+
+  // If browser requires explicit choice on Gemini failure (or has a client BYOK key to try next)
+  if (require_gemini && !force_local_fallback) {
+    if (has_client_key) {
+      return res.json({
+        understood: false,
+        delegate_to_client_gemini: true,
+        server_failure: serverFailure,
+      });
+    }
+    const failMeta: EngineResponseMeta = {
+      source: "gemini_failed",
+      via: "none",
+      model_used: serverFailure?.model_attempted,
+      failure: serverFailure || classifyGeminiError("No Gemini client configured"),
+    };
+    return res.json({
+      understood: true,
+      needs_api_or_local_choice: true,
+      reply:
+        `⚠️ تعذر الحصول على رد من وكيل Gemini:\n${failMeta.failure?.reason_ar}` +
+        `\n\nيمكنك **إضافة مفتاح API جديد** للمتابعة بالذكاء الاصطناعي الكامل، أو اختيار **الإكمال بالمحرك المحلي (أقل دقة)**.`,
+      updated_markdown: currentMarkdown,
+      updated_school: school,
+      should_solve: false,
+      applied_changes: [],
+      engine_source: failMeta,
+      analysis: InBrowserSchoolEngine.analyzeSchool(school),
+    });
+  }
+
+  const localMeta: EngineResponseMeta = {
+    source: "local_engine",
+    via: "local_fallback",
+    model_used: "المحرك المحلي",
+    failure: serverFailure,
+  };
 
   // Fallback / Offline Deterministic Engine: check if message is a conversational query or audit request
   const isQuery = isQuestionOrInquiry(effectiveMessage);
@@ -521,6 +574,7 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
       const nextSchool = extAction.updated_school || school;
       return res.json({
         understood: true,
+        engine_source: localMeta,
         reply: extAction.reply,
         updated_markdown: extAction.updated_markdown || currentMarkdown,
         updated_school: extAction.updated_school || school,
@@ -537,6 +591,7 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
       const solved = InBrowserSchoolEngine.solveInBrowser(periodCmd.school);
       return res.json({
         understood: true,
+        engine_source: localMeta,
         updated_school: periodCmd.school,
         updated_markdown: generateSchoolMarkdown(periodCmd.school, periodCmd.appliedChanges),
         applied_changes: periodCmd.appliedChanges,
@@ -586,6 +641,7 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
 
       return res.json({
         understood: true,
+        engine_source: localMeta,
         reply,
         updated_markdown: updatedMarkdown,
         updated_school: updatedSchool,
@@ -611,6 +667,7 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
   if (localAns.answered) {
     return res.json({
       understood: true,
+        engine_source: localMeta,
       reply: localAns.reply,
       updated_markdown: currentMarkdown,
       updated_school: school,
@@ -662,6 +719,7 @@ ${effectiveMessage}`,
           const execRes = executeGeminiParsedResponse(school, currentMarkdown, parsed, validateSchoolDataSchema);
           return res.json({
             understood: true,
+        engine_source: localMeta,
             reply: execRes.reply,
             updated_markdown: execRes.updated_markdown,
             updated_school: execRes.updated_school,
@@ -673,6 +731,7 @@ ${effectiveMessage}`,
       } else if (rawTextResponse.trim()) {
         return res.json({
           understood: true,
+        engine_source: localMeta,
           reply: rawTextResponse.trim(),
           updated_markdown: currentMarkdown,
           updated_school: school,
@@ -687,6 +746,7 @@ ${effectiveMessage}`,
   }
   return res.json({
     understood: true,
+        engine_source: localMeta,
     reply:
       `أهلاً بك! بخصوص استفسارك عن مدرسة "${school.name}":\n` +
       `المدرسة تضم ${school.sections.length} فصول و${school.teachers.length} معلماً بإجمالي ${school.assignments.reduce((s, a) => s + a.weekly_periods, 0)} حصة أسبوعياً.\n` +

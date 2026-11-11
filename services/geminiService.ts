@@ -43,8 +43,10 @@ import {
   sanitizePlacementRuleConflicts,
   executeGeminiParsedResponse,
   type AgentUiActionType,
+  type EngineResponseMeta,
+  type GeminiFailureInfo,
 } from "./agentMemoryEngine.ts";
-import { runGeminiToolCallingAgent } from "./agentTools.ts";
+import { runGeminiToolCallingAgent, classifyGeminiError } from "./agentTools.ts";
 
 export const DEFAULT_BACKEND_URL = "";
 
@@ -536,7 +538,8 @@ export class HybridSchoolService {
     school: SchoolData,
     schedule?: Schedule | null,
     markdown?: string,
-    history?: Array<{ role: "user" | "ai" | "model"; text: string }>
+    history?: Array<{ role: "user" | "ai" | "model"; text: string }>,
+    options?: { requireGeminiFirst?: boolean; forceLocalFallback?: boolean }
   ): Promise<{
     reply: string;
     updated_markdown?: string | null;
@@ -547,9 +550,13 @@ export class HybridSchoolService {
     analysis?: AnalysisReport;
     ui_action?: AgentUiActionType;
     ui_target_id?: string;
+    needs_api_or_local_choice?: boolean;
+    engine_source?: EngineResponseMeta;
   }> {
     const hasKeys = ApiKeyManager.getKeys().length > 0;
     const hasEnabledKeys = ApiKeyManager.getKeys().some((k) => k.enabled);
+
+    let serverFailure: GeminiFailureInfo | undefined;
 
     // 1. Try Backend Server API (runs Server Gemini Tool Agent first if configured, or local .md file loader)
     try {
@@ -563,12 +570,17 @@ export class HybridSchoolService {
           markdown: markdown || null,
           history: history || [],
           has_client_key: hasEnabledKeys,
+          require_gemini: Boolean(options?.requireGeminiFirst && !options?.forceLocalFallback),
+          force_local_fallback: Boolean(options?.forceLocalFallback),
         }),
       });
       if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
         const data = await res.json();
         if (data.understood) {
           return data;
+        }
+        if (data.server_failure) {
+          serverFailure = data.server_failure;
         }
       }
     } catch {
@@ -620,7 +632,8 @@ export class HybridSchoolService {
 
     // 3. AI-FIRST PRIORITY: Client-Side BYOK Gemini Tool-Calling Agent when browser key is active
     let fallbackNotice = "";
-    if (hasEnabledKeys) {
+    let byokFailure: GeminiFailureInfo | undefined = serverFailure;
+    if (hasEnabledKeys && !options?.forceLocalFallback) {
       try {
         const toolRes = await runGeminiToolCallingAgent({
           message,
@@ -644,6 +657,7 @@ export class HybridSchoolService {
                   text: response.text || "",
                   functionCalls: response.functionCalls,
                   modelContent: response.candidates?.[0]?.content as any,
+                  usedModel: DEFAULT_GEMINI_MODEL,
                 };
               },
               { onNotice: this.onKeyNotice }
@@ -661,22 +675,67 @@ export class HybridSchoolService {
             applied_changes: toolRes.applied_changes,
             ui_action: toolRes.ui_action,
             ui_target_id: toolRes.ui_target_id,
+            engine_source: {
+              source: "gemini_api",
+              via: "browser_byok",
+              model_used: toolRes.used_model || DEFAULT_GEMINI_MODEL,
+              tool_calls_used: toolRes.tool_calls_used,
+            },
             analysis: InBrowserSchoolEngine.analyzeSchool(toolRes.updated_school),
           };
         }
+        byokFailure = toolRes.failure_info || classifyGeminiError("empty response from model", DEFAULT_GEMINI_MODEL);
       } catch (err: unknown) {
+        const safeErrObj =
+          err instanceof AllKeysFailedError
+            ? err
+            : sanitizeSecretText(
+                err,
+                ApiKeyManager.getKeys().map((k) => k.key)
+              );
+        byokFailure = classifyGeminiError(safeErrObj, DEFAULT_GEMINI_MODEL);
         if (err instanceof AllKeysFailedError) {
           fallbackNotice = `\n⚠️ إشعار المفاتيح: ${err.message}`;
         } else {
-          const safeErr = sanitizeSecretText(
-            err,
-            ApiKeyManager.getKeys().map((k) => k.key)
-          );
-          fallbackNotice = `\n⚠️ تعذر الاتصال بـ Gemini (${safeErr.slice(0, 90)}) — تم التحويل تلقائياً إلى المحرك المحلي.`;
+          fallbackNotice = `\n⚠️ تعذر الاتصال بـ Gemini (${String(safeErrObj).slice(0, 90)}) — تم التحويل تلقائياً إلى المحرك المحلي.`;
         }
       }
+    } else if (!hasEnabledKeys && !byokFailure) {
+      byokFailure = classifyGeminiError(
+        hasKeys ? "جميع مفاتيح Gemini المضافة معطّلة حالياً" : "No Gemini client configured",
+        DEFAULT_GEMINI_MODEL
+      );
     }
+
+    // Strict Gemini-First Mode for Interactive UI: Ask user to add new API key or proceed with lower-precision local engine
+    if (options?.requireGeminiFirst && !options?.forceLocalFallback) {
+      const failInfo = byokFailure || classifyGeminiError("No Gemini client configured", DEFAULT_GEMINI_MODEL);
+      return {
+        reply:
+          `⚠️ تعذر الحصول على رد من وكيل Gemini:\n${failInfo.reason_ar}\n\n` +
+          `يمكنك **إضافة مفتاح API جديد** لإعادة المحاولة بالذكاء الاصطناعي الكامل، أو اختيار **الإكمال بالمحرك المحلي (أقل دقة)**.`,
+        updated_markdown: currentMarkdown,
+        updated_school: school,
+        should_solve: false,
+        applied_changes: [],
+        needs_api_or_local_choice: true,
+        engine_source: {
+          source: "gemini_failed",
+          via: "none",
+          model_used: failInfo.model_attempted,
+          failure: failInfo,
+        },
+        analysis: InBrowserSchoolEngine.analyzeSchool(school),
+      };
+    }
+
     const disabledKeysNotice = !hasEnabledKeys && hasKeys ? "\n💡 ملاحظة: جميع مفاتيح Gemini المضافة معطّلة حالياً؛ يعمل النظام عبر المحرك المحلي." : "";
+    const localMeta: EngineResponseMeta = {
+      source: "local_engine",
+      via: "local_fallback",
+      model_used: "المحرك المحلي",
+      failure: byokFailure,
+    };
 
     // 4. Deterministic Local Engine Fallback (works 100% offline with zero keys)
     const isQuery = isQuestionOrInquiry(message);
@@ -686,6 +745,7 @@ export class HybridSchoolService {
       if (extAction && extAction.handled) {
         const nextSchool = extAction.updated_school || school;
         return {
+      engine_source: localMeta,
           reply: extAction.reply + fallbackNotice,
           updated_markdown: extAction.updated_markdown || currentMarkdown,
           updated_school: extAction.updated_school || school,
@@ -700,6 +760,7 @@ export class HybridSchoolService {
       const periodCmd = tryApplyDailyPeriodsChatCommand(school, ctxMessage);
       if (periodCmd) {
         return {
+      engine_source: localMeta,
           updated_school: periodCmd.school,
           updated_markdown: generateSchoolMarkdown(periodCmd.school, periodCmd.appliedChanges),
           applied_changes: periodCmd.appliedChanges,
@@ -745,6 +806,7 @@ export class HybridSchoolService {
         }
 
         return {
+      engine_source: localMeta,
           reply: reply + fallbackNotice,
           updated_markdown: updatedMarkdown,
           updated_school: updatedSchool,
@@ -758,6 +820,7 @@ export class HybridSchoolService {
         const unstructured = parseUnstructuredArabicSchoolText(message);
         if (unstructured) {
           return {
+      engine_source: localMeta,
             reply: `✓ ${unstructured.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.` + fallbackNotice,
             updated_markdown: generateSchoolMarkdown(unstructured.school, unstructured.notes),
             updated_school: unstructured.school,
@@ -773,6 +836,7 @@ export class HybridSchoolService {
     const localAns = answerSchoolQuestion(message, school, schedule, preAnalysis, history);
     if (localAns.answered) {
       return {
+      engine_source: localMeta,
         reply: localAns.reply + fallbackNotice,
         updated_markdown: currentMarkdown,
         updated_school: school,
@@ -783,6 +847,7 @@ export class HybridSchoolService {
     }
 
     return {
+      engine_source: localMeta,
       reply:
         `أهلاً بك! بخصوص استفسارك عن مدرسة "${school.name}":\n` +
         `المدرسة تضم ${school.sections.length} فصول و${school.teachers.length} معلماً بإجمالي ${school.assignments.reduce((s, a) => s + a.weekly_periods, 0)} حصة أسبوعياً.\n` +

@@ -24,6 +24,21 @@ import {
 } from "../presets/commonPresets.ts";
 import { solveSchool } from "./solver.ts";
 
+export interface GeminiFailureInfo {
+  error_origin: "model" | "api_request" | "no_key";
+  http_status?: number | string;
+  model_attempted?: string;
+  reason_ar: string;
+}
+
+export interface EngineResponseMeta {
+  source: "gemini_api" | "local_engine" | "gemini_failed";
+  via: "server_api" | "browser_byok" | "local_fallback" | "none";
+  model_used?: string;
+  tool_calls_used?: string[];
+  failure?: GeminiFailureInfo;
+}
+
 export interface ChatMessageRecord {
   role: "user" | "ai";
   text: string;
@@ -31,6 +46,8 @@ export interface ChatMessageRecord {
   isError?: boolean;
   retryPrompt?: string;
   timestamp?: string;
+  engineMeta?: EngineResponseMeta;
+  pendingLocalPrompt?: string;
 }
 
 export interface SchoolUndoSnapshot {

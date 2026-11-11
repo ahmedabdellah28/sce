@@ -14,12 +14,128 @@ import { InBrowserSchoolEngine } from "./localEngine.ts";
 import { tryApplyDailyPeriodsChatCommand } from "../presets/commonPresets.ts";
 import {
   AgentUiActionType,
+  GeminiFailureInfo,
   analyzeTeacherFairness,
   applyFairTeacherDistribution,
   buildLiveAgentContextDigest,
   sanitizePlacementRuleConflicts,
   tryExecuteExtendedAgentAction,
 } from "./agentMemoryEngine.ts";
+
+export function classifyGeminiError(err: unknown, modelAttempted?: string): GeminiFailureInfo {
+  const anyErr = err as any;
+  const noticesStr = Array.isArray(anyErr?.notices) ? anyErr.notices.join(" | ") : "";
+  const rawMsg = [anyErr?.message || String(err || ""), noticesStr].filter(Boolean).join(" | ");
+  const low = rawMsg.toLowerCase();
+  const statusCode = anyErr?.status || anyErr?.statusCode || (rawMsg.match(/(400|401|403|404|429|500|502|503|504)/)?.[1] ? Number(rawMsg.match(/(400|401|403|404|429|500|502|503|504)/)![1]) : undefined);
+  const mdlLabel = modelAttempted || "gemini";
+
+  if (!err || /no_key|no gemini client|لا يوجد مفتاح|جميع مفاتيح/.test(low)) {
+    if (/429|تبريد|تجاوز الحصة|انتهاء الحصة|quota|rate/.test(low)) {
+      return {
+        error_origin: "api_request",
+        http_status: 429,
+        model_attempted: mdlLabel,
+        reason_ar: "انتهى حد الطلبات / الحصة المسموحة لمفتاح الـ API (HTTP 429 Quota/Cooldown).",
+      };
+    }
+    if (/400|401|403|غير صالح|مرفوض|invalid/.test(low)) {
+      return {
+        error_origin: "api_request",
+        http_status: statusCode || 403,
+        model_attempted: mdlLabel,
+        reason_ar: "مفتاح الـ API نفسه غير صالح أو مرفوض الصلاحيات.",
+      };
+    }
+    return {
+      error_origin: "no_key",
+      http_status: "NO_KEY",
+      model_attempted: mdlLabel,
+      reason_ar: "لا يوجد مفتاح Gemini API مفعّل حالياً (على الخادم أو في المتصفح).",
+    };
+  }
+
+  if (statusCode === 429 || /429|resource_exhausted|quota|rate limit|تبريد|تجاوز الحصة/.test(low)) {
+    return {
+      error_origin: "api_request",
+      http_status: 429,
+      model_attempted: mdlLabel,
+      reason_ar: "مشكلة في ريكويست وحصة الـ API: تم تجاوز حد الاستخدام أو انتهت كوتا المفتاح (HTTP 429).",
+    };
+  }
+
+  if (statusCode === 401 || statusCode === 403 || /401|403|permission_denied|unauthenticated|api_key_invalid|api key not valid|غير صالح|مرفوض/.test(low)) {
+    return {
+      error_origin: "api_request",
+      http_status: statusCode || 403,
+      model_attempted: mdlLabel,
+      reason_ar: `مشكلة في مفتاح أو طلب الـ API: المفتاح غير صالح أو مرفوض (${statusCode || 403}).`,
+    };
+  }
+
+  if (statusCode === 400 || /invalid_argument/.test(low)) {
+    return {
+      error_origin: "api_request",
+      http_status: 400,
+      model_attempted: mdlLabel,
+      reason_ar: "مشكلة في صياغة ريكويست أو مفتاح الـ API (HTTP 400 Bad Request / Invalid Key).",
+    };
+  }
+
+  if (/fetch failed|failed to fetch|enotfound|econnrefused|network|econnreset|etimedout/.test(low)) {
+    return {
+      error_origin: "api_request",
+      http_status: "NETWORK",
+      model_attempted: mdlLabel,
+      reason_ar: "مشكلة في إرسال ريكويست الـ API عبر الشبكة إلى خوادم Google (تحقق من الاتصال).",
+    };
+  }
+
+  if (statusCode === 503 || statusCode === 502 || statusCode === 504 || /503|unavailable|high demand|overloaded/.test(low)) {
+    return {
+      error_origin: "model",
+      http_status: statusCode || 503,
+      model_attempted: mdlLabel,
+      reason_ar: `مشكلة من الموديل نفسه (${mdlLabel}): خادم الموديل مزدحم حالياً أو غير متاح مؤقتاً (HTTP ${statusCode || 503}).`,
+    };
+  }
+
+  if (statusCode === 404 || /404|no longer available|not found/.test(low)) {
+    return {
+      error_origin: "model",
+      http_status: 404,
+      model_attempted: mdlLabel,
+      reason_ar: `مشكلة من الموديل نفسه (${mdlLabel}): هذا الإصدار من الموديل غير متاح أو أوقفته Google (HTTP 404).`,
+    };
+  }
+
+  if (/timeout|aborted|timeouterror|this operation was aborted/.test(low)) {
+    return {
+      error_origin: "model",
+      http_status: "TIMEOUT",
+      model_attempted: mdlLabel,
+      reason_ar: `مشكلة من الموديل نفسه (${mdlLabel}): استغرق الموديل وقتاً أطول من المهلة المسموحة دون رد.`,
+    };
+  }
+
+  if (/without calling any tool|empty/.test(low)) {
+    return {
+      error_origin: "model",
+      http_status: "MODEL_BEHAVIOR",
+      model_attempted: mdlLabel,
+      reason_ar: `مشكلة في استجابة الموديل نفسه (${mdlLabel}): أعاد رداً غير مكتمل أو لم يستدعِ الأداة المطلوبة.`,
+    };
+  }
+
+  return {
+    error_origin: statusCode && statusCode >= 500 ? "model" : "api_request",
+    http_status: statusCode || "ERR",
+    model_attempted: mdlLabel,
+    reason_ar: statusCode && statusCode >= 500
+      ? `مشكلة من خادم الموديل (${mdlLabel}): ${rawMsg.slice(0, 110)}`
+      : `خطأ في طلب الـ API: ${rawMsg.slice(0, 110)}`,
+  };
+}
 import { answerSchoolQuestion } from "./schoolAssistant.ts";
 
 const DAY_AR: Record<number, string> = {
@@ -277,7 +393,9 @@ export interface ToolAgentExecutionResult {
   ui_action?: AgentUiActionType;
   ui_target_id?: string;
   tool_calls_used: string[];
+  used_model?: string;
   error_notice?: string;
+  failure_info?: GeminiFailureInfo;
 }
 
 export type GeminiTurnGenerator = (
@@ -291,6 +409,7 @@ export type GeminiTurnGenerator = (
   text: string;
   functionCalls?: FunctionCall[];
   modelContent?: { role: string; parts: Part[] };
+  usedModel?: string;
   notices?: string[];
 }>;
 
@@ -313,6 +432,7 @@ export async function runGeminiToolCallingAgent(params: {
   let uiTargetId: string | undefined;
   const toolCallsUsed: string[] = [];
   const allNotices: string[] = [];
+  let lastUsedModel: string | undefined;
 
   const contents: Array<{ role: string; parts: Array<any> }> = [];
   for (const h of history.slice(-14)) {
@@ -692,6 +812,7 @@ ${message}`,
         tools: [{ functionDeclarations: AGENT_TOOL_DECLARATIONS }],
         maxOutputTokens: 4096,
       });
+      if (turn.usedModel) lastUsedModel = turn.usedModel;
       if (turn.notices?.length) {
         allNotices.push(...turn.notices);
       }
@@ -741,7 +862,9 @@ ${message}`,
             should_solve: false,
             applied_changes: [],
             tool_calls_used: toolCallsUsed,
-            error_notice: "Model claimed mutation without calling any tool; fell back to deterministic engine.",
+            used_model: lastUsedModel,
+            error_notice: "Model claimed mutation without calling any tool.",
+            failure_info: classifyGeminiError("Model claimed mutation without calling any tool", lastUsedModel),
           };
         }
         const prefix = allNotices.length > 0 ? `${allNotices.join("\n")}\n\n` : "";
@@ -760,6 +883,7 @@ ${message}`,
           ui_action: uiAction,
           ui_target_id: uiTargetId,
           tool_calls_used: toolCallsUsed,
+          used_model: lastUsedModel,
         };
       }
       break;
@@ -773,7 +897,9 @@ ${message}`,
       should_solve: false,
       applied_changes: [],
       tool_calls_used: toolCallsUsed,
+      used_model: lastUsedModel,
       error_notice: err?.message || String(err),
+      failure_info: classifyGeminiError(err, lastUsedModel),
     };
   }
 
@@ -785,5 +911,7 @@ ${message}`,
     should_solve: false,
     applied_changes: [],
     tool_calls_used: toolCallsUsed,
+    used_model: lastUsedModel,
+    failure_info: classifyGeminiError("empty response from model", lastUsedModel),
   };
 }
