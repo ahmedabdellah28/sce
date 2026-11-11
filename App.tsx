@@ -1463,66 +1463,54 @@ export default function App() {
               : "bg-[#FFFFFF] text-[#1C1917] border border-[#E7E5E4] me-auto max-w-[92%]"
               }`}
           >
-            <div className="flex items-center justify-between mb-1.5 text-[11px] font-bold">
-              <span
-                className={`flex items-center gap-1.5 ${item.role === "user" ? "text-[#CCFBF1]" : "text-[#6D28D9]"
-                  }`}
-              >
-                {item.role === "ai" && (
-                  <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-[#EDE9FE] text-[#8B5CF6]" aria-hidden="true">
-                    ✦
-                  </span>
+            <div className="flex items-center justify-between gap-2 mb-1.5 text-[11px] font-bold">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className={`inline-flex items-center gap-1.5 ${item.role === "user" ? "text-[#CCFBF1]" : "text-[#6D28D9]"}`}
+                >
+                  {item.role === "ai" && (
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-[#EDE9FE] text-[#8B5CF6]" aria-hidden="true">
+                      ✦
+                    </span>
+                  )}
+                  <span>{item.role === "user" ? "طلبك" : "AI"}</span>
+                </span>
+                {item.role === "ai" && item.engineMeta && (
+                  item.engineMeta.source === "gemini_api" ? (
+                    <span
+                      title={`${item.engineMeta.model_used || "gemini"} · ${item.engineMeta.via === "browser_byok" ? "BYOK" : "Server"}${item.engineMeta.tool_calls_used?.length ? ` · ${item.engineMeta.tool_calls_used.length} أداة` : ""}`}
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#CCFBF1] text-[#0F766E] border border-[#14B8A6]/40"
+                    >
+                      Gemini
+                    </span>
+                  ) : item.engineMeta.source === "local_engine" ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                      محلي (أقل دقة)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300">
+                      <span>
+                        {item.engineMeta.failure?.error_origin === "model"
+                          ? "🤖 خطأ الموديل"
+                          : item.engineMeta.failure?.error_origin === "no_key"
+                            ? "🔑 بدون مفتاح"
+                            : "🔑 خطأ API"}
+                      </span>
+                      {item.engineMeta.failure?.http_status && (
+                        <span dir="ltr" className="font-mono text-[9.5px]">
+                          [{item.engineMeta.failure.http_status}]
+                        </span>
+                      )}
+                    </span>
+                  )
                 )}
-                <span>{item.role === "user" ? "طلبك" : "وكيل الجداول الذكي"}</span>
-              </span>
+              </div>
               {item.timestamp && (
-                <span className={item.role === "user" ? "text-[#CCFBF1]" : "text-[#57534E]"}>
+                <span className={`shrink-0 ${item.role === "user" ? "text-[#CCFBF1]" : "text-[#57534E]"}`}>
                   {item.timestamp}
                 </span>
               )}
             </div>
-
-            {item.role === "ai" && item.engineMeta && (
-              <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                {item.engineMeta.source === "gemini_api" ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#CCFBF1] text-[#0F766E] border border-[#14B8A6]/40">
-                    <span>✨ Gemini API</span>
-                    {item.engineMeta.model_used && (
-                      <span dir="ltr" className="font-mono text-[9.5px] opacity-85">
-                        ({item.engineMeta.model_used})
-                      </span>
-                    )}
-                    <span className="opacity-75">· {item.engineMeta.via === "browser_byok" ? "BYOK" : "Server"}</span>
-                  </span>
-                ) : item.engineMeta.source === "local_engine" ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
-                    <span>⚙️ المحرك المحلي (أقل دقة)</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300">
-                    <span>
-                      {item.engineMeta.failure?.error_origin === "model"
-                        ? "🤖 خطأ من الموديل نفسه"
-                        : item.engineMeta.failure?.error_origin === "no_key"
-                          ? "🔑 لا يوجد مفتاح API"
-                          : "🔑 خطأ في ريكويست / مفتاح API"}
-                    </span>
-                    {item.engineMeta.failure?.http_status && (
-                      <span dir="ltr" className="font-mono text-[9.5px]">
-                        [{item.engineMeta.failure.http_status}]
-                      </span>
-                    )}
-                  </span>
-                )}
-                {item.engineMeta.source === "gemini_api" &&
-                  Array.isArray(item.engineMeta.tool_calls_used) &&
-                  item.engineMeta.tool_calls_used.length > 0 && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#EDE9FE] text-[#6D28D9]">
-                      🛠️ {item.engineMeta.tool_calls_used.length} أداة
-                    </span>
-                  )}
-              </div>
-            )}
 
             <div className="leading-relaxed font-medium">{item.text}</div>
 
