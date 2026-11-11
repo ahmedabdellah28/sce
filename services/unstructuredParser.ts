@@ -216,7 +216,7 @@ export function parseUnstructuredArabicSchoolText(rawText: string): {
 
   // Global max consecutive
   const consecMatch = fullNorm.match(/تتابع\s*الحصص.*?(?:عن\s*)?(\d+)/);
-  const globalMaxConsec = consecMatch ? Number(consecMatch[1]) : 3;
+  const globalMaxConsec = consecMatch ? Number(consecMatch[1]) : 6;
 
   // Build Grades & Sections
   const sortedSecCodes = Array.from(secSet).sort((a, b) => {
@@ -238,21 +238,86 @@ export function parseUnstructuredArabicSchoolText(rawText: string): {
   const gradeMap = new Map<number, Grade>();
   const sections: Section[] = [];
 
-  const grade1Limits: Record<string, number> = {};
-  const thursdayReducedMatch = fullNorm.match(/(?:اول[ىي]|الصف\s*الاول).*?(?:الخميس|خميس).*?(\d+)\s*حص/);
-  if (thursdayReducedMatch) {
-    grade1Limits["4"] = Number(thursdayReducedMatch[1]);
+  // Extract per-grade / per-shift daily period limits from natural Arabic descriptions
+  const gradeLimitsMap = new Map<number, Record<string, number>>();
+  const ensureGradeLimits = (g: number) => {
+    if (!gradeLimitsMap.has(g)) gradeLimitsMap.set(g, {});
+    return gradeLimitsMap.get(g)!;
+  };
+  const gradeWordMap: Array<{ g: number; rx: RegExp }> = [
+    { g: 1, rx: /اول[ىي]|الصف\s*الاول|صف\s*1|سنه\s*اول[ىي]/ },
+    { g: 2, rx: /تاني[ةه]|ثان[يى]|الصف\s*الثان[يى]|سنه\s*تاني[ةه]/ },
+    { g: 3, rx: /تالت[ةه]|ثالث[ةه]|الصف\s*الثالث|سنه\s*تالت[ةه]/ },
+    { g: 4, rx: /رابع[ةه]|الصف\s*الرابع|سنه\s*رابع[ةه]/ },
+    { g: 5, rx: /خامس[ةه]|الصف\s*الخامس|سنه\s*خامس[ةه]/ },
+    { g: 6, rx: /سادس[ةه]|الصف\s*السادس|سنه\s*سادس[ةه]/ },
+  ];
+
+  for (const rawL of lines) {
+    const ln = normAr(rawL);
+    // Only treat as schedule structure line if it mentions periods per day and NOT a single teacher assignment
+    if (!/حص[ةهص]/.test(ln)) continue;
+    const isStructLine = /(?:صباح[يى]|مسائ[يى]|ما\s*عدا|باقي\s*الايام|كل\s*يوم|يوميا|في\s*اليوم|بياخدوا|عندهم\s*\d+\s*حص)/.test(ln);
+    if (!isStructLine) continue;
+
+    const targetGrades: number[] = [];
+    if (/صباح[يى]/.test(ln)) targetGrades.push(1, 2, 3);
+    if (/مسائ[يى]/.test(ln)) targetGrades.push(4, 5, 6);
+    for (const gw of gradeWordMap) {
+      if (gw.rx.test(ln) && !targetGrades.includes(gw.g)) targetGrades.push(gw.g);
+    }
+    if (targetGrades.length === 0) continue;
+
+    const baseM = ln.match(/(\d+)\s*حص[ةهص]?\s*(?:يوميا|في\s*اليوم|كل\s*يوم|طوال\s*الاسبوع|عادي)/) || ln.match(/^[^\d]*(\d+)\s*حص/);
+    const baseCap = baseM ? Number(baseM[1]) : null;
+    if (baseCap && baseCap >= 4 && baseCap <= 10) {
+      for (const g of targetGrades) {
+        const lim = ensureGradeLimits(g);
+        for (const d of days) lim[String(d)] = baseCap;
+      }
+    }
+
+    // Parse specific day exceptions like "ما عدا الخميس 5" or "الاثنين 8 حصص"
+    const dayExceptionMatches = Array.from(
+      ln.matchAll(/(?:ما\s*عدا|ال?خميس|ال?احد|ال?اثنين|ال?اتنين|ال?ثلاثاء|ال?تلات|ال?اربعاء|ال?سبت)\s*(?:يوم\s*)?(ال?سبت|ال?احد|ال?اثنين|ال?اتنين|ال?ثلاثاء|ال?تلات|ال?اربعاء|ال?خميس)?[^\d]{0,12}(\d+)\s*حص/g)
+    );
+    for (const dm of dayExceptionMatches) {
+      const ds = extractDayNumbers(dm[0]);
+      const cnt = Number(dm[2]);
+      if (cnt >= 1 && cnt <= 10) {
+        for (const g of targetGrades) {
+          const lim = ensureGradeLimits(g);
+          for (const d of ds) lim[String(d)] = cnt;
+        }
+      }
+    }
+  }
+
+  // Backward-compatible fallback for single line mentioning أولى والخميس
+  if (!gradeLimitsMap.has(1)) {
+    const thursdayReducedMatch = fullNorm.match(/(?:اول[ىي]|الصف\s*الاول).*?(?:الخميس|خميس).*?(\d+)\s*حص/);
+    if (thursdayReducedMatch) {
+      ensureGradeLimits(1)["4"] = Number(thursdayReducedMatch[1]);
+    }
+  }
+
+  let effectiveSchoolPeriodsPerDay = periodsPerDay;
+  for (const lim of gradeLimitsMap.values()) {
+    for (const v of Object.values(lim)) {
+      if (v > effectiveSchoolPeriodsPerDay) effectiveSchoolPeriodsPerDay = v;
+    }
   }
 
   for (const code of sortedSecCodes) {
     const gNum = Number(code.split("/")[0]);
+    const gLim = gradeLimitsMap.get(gNum);
     if (!gradeMap.has(gNum)) {
       gradeMap.set(gNum, {
         id: `G_${gNum}`,
         name: gradeNames[gNum] || `الصف ${gNum}`,
         code: `G${gNum}`,
         order: gNum,
-        daily_period_limits: gNum === 1 && Object.keys(grade1Limits).length > 0 ? { ...grade1Limits } : undefined,
+        daily_period_limits: gLim && Object.keys(gLim).length > 0 ? { ...gLim } : undefined,
       });
     }
     const gr = gradeMap.get(gNum)!;
@@ -261,6 +326,7 @@ export function parseUnstructuredArabicSchoolText(rawText: string): {
       grade_id: gr.id,
       name: code,
       code,
+      shift: /فترتين|صباح[يى].*مسائ[يى]|مسائ[يى].*صباح[يى]/.test(fullNorm) ? (gNum >= 4 ? "SECOND" : "FIRST") : undefined,
       daily_period_limits: gr.daily_period_limits ? { ...gr.daily_period_limits } : undefined,
     });
   }
@@ -522,7 +588,7 @@ export function parseUnstructuredArabicSchoolText(rawText: string): {
       ? cleanAsgnBody.split("لأ ثواني،").slice(-1)[0]
       : cleanAsgnBody;
 
-    const clauses = correctedBody.split(/(?:\s+(?:وبيدي|وبتدي|وكمان|ومعاه|ومعاها)\s+)/);
+    const clauses = correctedBody.split(/(?:\s+(?:وبيدي|وبتدي|وكمان|ومعاه|ومعاها)\s+|\s*[+،]\s*(?=(?:عرب|لغ[ةه]|دين|تربي|رياض|حساب|انجليز|علوم|دراسات|توكاتسو|تكنولوج|مهارات|العاب|موسيق|رسم|فني)))/i);
     let currentSubjDef = defaultSubjDef;
 
     for (const clause of clauses) {
@@ -582,7 +648,8 @@ export function parseUnstructuredArabicSchoolText(rawText: string): {
     name: schoolName,
     academic_year: academicYear,
     days,
-    periods_per_day: periodsPerDay,
+    shift_mode: sections.some((s) => s.shift === "SECOND") && sections.some((s) => s.shift === "FIRST") ? "TWO_SHIFTS" : "SINGLE",
+    periods_per_day: effectiveSchoolPeriodsPerDay,
     grades,
     sections,
     subjects: Array.from(subjectMap.values()),
