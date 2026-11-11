@@ -740,6 +740,45 @@ async function runHumanFirstTimeSimulation() {
     passed("19k. normalizeAiExtractedSchoolJson & reconcileAiWithDeterministicSchool preserve shifts, rules & subject_ids");
   }
 
+  // 19l. Teacher lookup must NOT false-match "آلاء شحاتة" via "اء" in "الثلاثاء" when targeting "فاطمة شحاته"
+  {
+    const familySchool: SchoolData = JSON.parse(JSON.stringify(school));
+    const tFatima = {
+      id: "TCH_FATIMA_SH",
+      name: "فاطمة شحاتة",
+      code: "فاطمة",
+      subject_ids: [school.subjects[0].id],
+      max_daily_periods: 6,
+      max_weekly_periods: 24,
+      max_consecutive_periods: 6,
+      work_pattern: { day_rules: {}, daily_period_rules: [], placement_rules: [] },
+    };
+    const tAlaa = {
+      id: "TCH_ALAA_SH",
+      name: "آلاء شحاتة",
+      code: "آلاء",
+      subject_ids: [school.subjects[0].id],
+      max_daily_periods: 6,
+      max_weekly_periods: 24,
+      max_consecutive_periods: 6,
+      work_pattern: { day_rules: {}, daily_period_rules: [], placement_rules: [] },
+    };
+    familySchool.teachers.push(tFatima, tAlaa);
+    const res19l = await browserService.chatWithCopilot(
+      "المعملة فاطمة شحاته يوم الثلاثاء: تعمل الحصص (1، 2، 3) فقط وممنوعة من الحصص (4، 5، 6)",
+      familySchool,
+      null,
+      "",
+      [],
+      { forceLocalFallback: true }
+    );
+    const fatimaAfter = res19l.updated_school?.teachers.find((t) => t.id === "TCH_FATIMA_SH");
+    const alaaAfter = res19l.updated_school?.teachers.find((t) => t.id === "TCH_ALAA_SH");
+    assert.ok((fatimaAfter?.work_pattern?.placement_rules?.length || 0) >= 1, "Fatima must receive the Tuesday rule");
+    assert.equal(alaaAfter?.work_pattern?.placement_rules?.length || 0, 0, "Alaa Shehata must NOT be mutated");
+    passed("19l. Word-bounded teacher lookup isolates فاطمة شحاتة without touching آلاء شحاتة on يوم الثلاثاء");
+  }
+
   console.log("\nALL_HUMAN_E2E_AGENT_MEMORY_TESTS_PASSED");
 }
 

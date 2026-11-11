@@ -78,6 +78,114 @@ export type AgentUiActionType =
   | "view_section"
   | "view_teacher";
 
+const EXACT_TEACHER_TITLES = new Set([
+  "أ", "ا", "استاذ", "استاذة", "استاذه", "الاستاذ", "الاستاذة", "الاستاذه",
+  "معلم", "معلمة", "معلمه", "المعلم", "المعلمة", "المعلمه", "المعملة", "المعمله",
+  "مدرس", "مدرسة", "مدرسه", "المدرس", "المدرسة", "المدرسه",
+  "مستر", "ميس", "دكتور", "دكتورة", "دكتوره", "شيخ", "كابتن",
+]);
+
+const SINGLE_TOKEN_STOP_WORDS = new Set([
+  "الله", "عبد", "ابو", "ام", "بن", "بنت", "الدين", "دين", "الاسلام", "اسلام",
+  "عربي", "العربي", "العربيه", "اللغه", "انجليزي", "الانجليزي", "رياضيات", "الرياضيات", "حساب",
+  "علوم", "العلوم", "دراسات", "الدراسات", "جغرافيا", "تاريخ", "احياء", "فيزياء", "كيمياء",
+  "جيولوجيا", "فلسفه", "احصاء", "حاسب", "كمبيوتر", "موسيقى", "رسم", "فنيه", "العاب", "تربيه", "التربيه",
+  "مهارات", "توكاتسو", "اكتشف", "قيم", "اقتصاد", "نحو", "صرف", "بلاغه", "قران", "فقه", "تفسير", "حديث",
+  "ماده", "فصل", "حصه", "حصص", "يوم", "ايام", "اجازه", "صباح", "صباحا", "مساء", "فقط", "عمل", "تعمل", "يعمل",
+  "السبت", "سبت", "الاحد", "احد", "الاثنين", "اثنين", "الثلاثاء", "ثلاثاء", "الاربعاء", "اربعاء", "الخميس", "خميس", "الجمعه",
+]);
+
+function escapeRegexSafe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getExactTeacherWords(name: string): string[] {
+  return normAr(name)
+    .replace(/[()\/\\\-–—،,.:"]/g, " ")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w && !EXACT_TEACHER_TITLES.has(w));
+}
+
+function hasWholeWordInNormMsg(normMsg: string, word: string): number {
+  const esc = escapeRegexSafe(word);
+  const startB = `(?:^|[\\s،,.;:()\\[\\]"'«»*\`\\-–—\\/\\\\])`;
+  const endB = `(?=$|[\\s،,.;:()\\[\\]"'«»*\`\\-–—\\/\\\\])`;
+  // Allow attached Arabic conjunctions/prepositions (و، ف، ب، ل، ك) only when word >= 2 chars
+  const pat =
+    word.length >= 2
+      ? `${startB}(?:[وفبلك]?)${esc}${endB}`
+      : `${startB}${esc}${endB}`;
+  const m = new RegExp(pat).exec(normMsg);
+  if (m) return m.index;
+  // Also allow "ال" prefix stripping ONLY if stripped token is >= 3 chars (never turns "الاء" -> "اء"!)
+  if (word.startsWith("ال") && word.length >= 5) {
+    const bare = word.slice(2);
+    const barePat = `${startB}(?:[وفبلك]?)(?:ال)?${escapeRegexSafe(bare)}${endB}`;
+    const m2 = new RegExp(barePat).exec(normMsg);
+    if (m2) return m2.index;
+  }
+  return -1;
+}
+
+/**
+ * Strict word-bounded teacher finder inside chat messages.
+ * Prevents false substring collisions such as "آلاء شحاتة" (alef+hamza after stripping ال -> "اء")
+ * falsely matching inside "الثلاثاء" when the user wrote "فاطمة شحاته يوم الثلاثاء".
+ */
+export function findExactTeachersInMessage(school: SchoolData, message: string): Teacher[] {
+  const normMsg = normAr(message);
+  const scored: Array<{ teacher: Teacher; pos: number; score: number }> = [];
+
+  for (const t of school.teachers) {
+    const tFull = normAr(t.name);
+    const fullPos = hasWholeWordInNormMsg(normMsg, tFull);
+    if (fullPos >= 0) {
+      scored.push({ teacher: t, pos: fullPos, score: 120 + tFull.length });
+      continue;
+    }
+
+    const words = getExactTeacherWords(t.name);
+    if (words.length >= 2) {
+      const joined = words.join(" ");
+      const joinedPos = hasWholeWordInNormMsg(normMsg, joined);
+      if (joinedPos >= 0) {
+        scored.push({ teacher: t, pos: joinedPos, score: 100 + joined.length });
+        continue;
+      }
+      const positions = words.map((w) => hasWholeWordInNormMsg(normMsg, w));
+      if (positions.every((p) => p >= 0)) {
+        scored.push({ teacher: t, pos: Math.min(...positions), score: 70 + words.length * 5 });
+        continue;
+      }
+    }
+
+    // Single distinctive first/personal word (>= 3 chars, not a subject/compound word) shared by no other teacher
+    for (const w of words) {
+      if (w.length < 3 || SINGLE_TOKEN_STOP_WORDS.has(w)) continue;
+      const pos = hasWholeWordInNormMsg(normMsg, w);
+      if (pos >= 0) {
+        const sharesWord = school.teachers.some(
+          (other) => other.id !== t.id && getExactTeacherWords(other.name).includes(w)
+        );
+        if (!sharesWord) {
+          scored.push({ teacher: t, pos, score: 45 });
+          break;
+        }
+      }
+    }
+  }
+
+  const bestById = new Map<string, { teacher: Teacher; pos: number; score: number }>();
+  for (const item of scored) {
+    const prev = bestById.get(item.teacher.id);
+    if (!prev || item.score > prev.score) bestById.set(item.teacher.id, item);
+  }
+  const result = [...bestById.values()];
+  result.sort((a, b) => a.pos - b.pos);
+  return result.map((r) => r.teacher);
+}
+
 export interface ExtendedAgentActionResult {
   handled: boolean;
   reply: string;
@@ -194,7 +302,7 @@ export function extractConversationContext(
 
     if (!ctx.lastTeacher) {
       const cleanScan = scanText.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ");
-      const tMatches = findTeachersInMessage(school, cleanScan);
+      const tMatches = findExactTeachersInMessage(school, cleanScan);
       // Only treat AI text as focusing on a teacher if it is not a multi-teacher summary/reserve table
       const isMultiTeacherList = h.role === "ai" && !(Array.isArray(h.changes) && h.changes.length > 0) && tMatches.length > 2;
       if (tMatches.length > 0 && !isMultiTeacherList) ctx.lastTeacher = tMatches[0];
@@ -207,7 +315,7 @@ export function extractConversationContext(
     }
     if (!ctx.lastFocus && h.role === "user") {
       const cleanUserScan = scanText.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ");
-      if (findTeachersInMessage(school, cleanUserScan).length > 0) ctx.lastFocus = "teacher";
+      if (findExactTeachersInMessage(school, cleanUserScan).length > 0) ctx.lastFocus = "teacher";
     }
     if (!ctx.lastSubject) {
       const sub = findSubjectInMessage(school, scanText) || findMatchingSubjectInSchool(school.subjects, scanText);
@@ -327,7 +435,7 @@ export function enrichMessageWithMemoryContext(
       const scan = [h.text || "", ...(h.changes || [])].join(" ");
       if (/(اجاز[ةهت]|اوف|تفرغ)/.test(normAr(scan))) {
         const cleanScan = scan.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ");
-        const tMatches = findTeachersInMessage(school, cleanScan);
+        const tMatches = findExactTeachersInMessage(school, cleanScan);
         const dMatches = parseDaysList(scan);
         if (tMatches.length > 0 && dMatches.length > 0) {
           revTch = tMatches[0];
@@ -401,7 +509,7 @@ export function tryExecuteExtendedAgentAction(
       const periodsCount = Number(assignProposal[1]);
       const subjName = assignProposal[2].trim();
       const secCode = assignProposal[3]?.trim();
-      let chosenTeacher = findTeachersInMessage(school, message)[0];
+      let chosenTeacher = findExactTeachersInMessage(school, message)[0];
       if (!chosenTeacher) {
         const candidates = [...lastAiMsg.text.matchAll(/^\d+\.\s*\*\*([^*]+)\*\*/gm)].map((m) => m[1].trim());
         const pickIdx = /(?:الأول|الاول|للاول)/.test(n) ? 0 : /(?:الثاني|التاني|للثاني|للتاني)/.test(n) ? 1 : /(?:الثالث|التالت|للثالث|للتالت)/.test(n) ? 2 : -1;
@@ -1022,7 +1130,7 @@ export function tryExecuteExtendedAgentAction(
           " "
         )
         .trim();
-      const tMatches = findTeachersInMessage(school, msgForTch);
+      const tMatches = findExactTeachersInMessage(school, msgForTch);
       const targetT = tMatches.length === 1 ? tMatches[0] : resolveTeacherFromMessage(school, msgForTch).teacher;
       const ops: Op[] = [
         {
@@ -1193,7 +1301,7 @@ export function tryExecuteExtendedAgentAction(
 
   // 8. Clear explicit teacher placement constraint ("الغي قيود الأستاذ فلان" / "امسح قيد يوم الاحد لفلان")
   if (/(?:الغ|الغاء|الغي|احذف|حذف|امسح|ازل|شيل).*(?:قيد|قيود)/.test(n)) {
-    const tMatches = findTeachersInMessage(school, message);
+    const tMatches = findExactTeachersInMessage(school, message);
     if (tMatches.length === 1) {
       const target = tMatches[0];
       const dayMatches = parseDaysList(message.replace(target.name, " "));
@@ -1240,7 +1348,7 @@ export function tryExecuteExtendedAgentAction(
       n
     );
   if (hasCancelOrNegVerb && !hasOffKeyword && hasExplicitPeriodSlot && !/\d+\s*[\/\\]\s*\d+/.test(n)) {
-    const tMatches = findTeachersInMessage(school, message);
+    const tMatches = findExactTeachersInMessage(school, message);
     const targetTeacher = tMatches.length === 1 ? tMatches[0] : resolveTeacherFromMessage(school, message).teacher;
     if (targetTeacher) {
       const strippedBody = message
@@ -1286,7 +1394,7 @@ export function tryExecuteExtendedAgentAction(
     const cleanMsgForTeachers = message
       .replace(/(?:يمشوا|بيمشوا|يمشي|بيمشي|يطلع|بيطلع|يروح|بيروح)\s+بدري/g, " ")
       .replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " ");
-    const singleTeachers = findTeachersInMessage(school, cleanMsgForTeachers);
+    const singleTeachers = findExactTeachersInMessage(school, cleanMsgForTeachers);
     if (singleTeachers.length === 1) {
       const targetTeacher = singleTeachers[0];
       const strippedBody = message
@@ -1348,7 +1456,7 @@ export function tryExecuteExtendedAgentAction(
 
   // 10. Compound Multi-Teacher Rule Dispatcher (e.g. "خلي الحصة الأخيرة يوم الأحد لناصر وبلاش لبدري وريا")
   if (!/(?:بدل|استبدل|شيل.*وحط|مع بعض)/.test(n)) {
-    const multiTeachers = findTeachersInMessage(school, message.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " "));
+    const multiTeachers = findExactTeachersInMessage(school, message.replace(/\b[1-6]\s*[\/\\]\s*[1-9]\b/g, " "));
     if (multiTeachers.length >= 2) {
       const sortedMatches = [...multiTeachers].sort(
         (a, b) => message.indexOf(a.name) - message.indexOf(b.name)
@@ -1364,7 +1472,7 @@ export function tryExecuteExtendedAgentAction(
       const allOps: Op[] = [];
       for (let idx = 0; idx < contrastSplit.length; idx++) {
         const seg = contrastSplit[idx].trim();
-        const segTeachers = findTeachersInMessage(school, seg);
+        const segTeachers = findExactTeachersInMessage(school, seg);
         if (segTeachers.length === 0) continue;
 
         let segBody = seg;
