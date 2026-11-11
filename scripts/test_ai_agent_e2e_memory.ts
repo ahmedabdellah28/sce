@@ -8,6 +8,7 @@ import { getBuiltInSchool376, InBrowserSchoolEngine } from "../services/localEng
 import { parseUnstructuredArabicSchoolText } from "../services/unstructuredParser.ts";
 import { DEFAULT_CHAT_WELCOME_MESSAGE, type ChatMessageRecord } from "../services/agentMemoryEngine.ts";
 import { getOrderedSchoolDays } from "../presets/commonPresets.ts";
+import { runGeminiToolCallingAgent, AGENT_TOOL_DECLARATIONS } from "../services/agentTools.ts";
 
 function passed(label: string) {
   console.log(`✅ [E2E PASS] ${label}`);
@@ -344,13 +345,147 @@ async function runHumanFirstTimeSimulation() {
     });
     assert.equal(cancelPeriodRes.status, 200);
     const cancelData = await cancelPeriodRes.json();
-    assert.ok(
-      cancelData.reply.includes("لا يعمل في الحصة الأولى") && !cancelData.reply.includes("أول 1 حصص"),
-      `Server cancel period 1 misparsed: ${cancelData.reply}`
-    );
+    const badriSrvAfter = cancelData.updated_school?.teachers?.find((t: any) => t.id === badriPre.id);
+    const rulesSrv = badriSrvAfter?.work_pattern?.placement_rules || [];
+    const hasAvoidFirstSrv = rulesSrv.some((r: any) => Number(r.day) === 0 && r.placement_type === "AVOID_FIRST");
+    const hasStaleFirstSrv = rulesSrv.some((r: any) => Number(r.day) === 0 && r.placement_type === "FIRST_N");
+    assert.ok(hasAvoidFirstSrv && !hasStaleFirstSrv, `Server cancel period 1 misparsed: ${cancelData.reply}`);
     passed("18. Live Express server /api/ai/chat cancellation phrasing -> AVOID_FIRST");
   } else {
     console.log("ℹ️ Live server not active on port 3000; skipping HTTP check.");
+  }
+
+  // -----------------------------------------------------------------------
+  // Part C: True AI-First Tool Calling Agent Loop (FunctionCalling + Fallback)
+  // -----------------------------------------------------------------------
+  assert.ok(AGENT_TOOL_DECLARATIONS.length >= 10, "All agent tool declarations registered");
+
+  // 19a. Multi-step Tool Call: analyze_fairness -> apply_fair_distribution
+  {
+    let step = 0;
+    const res19a = await runGeminiToolCallingAgent({
+      message: "افحص العدالة ثم وزع الحصص بالتساوي على المعلمين",
+      school,
+      markdown: "",
+      schedule,
+      history,
+      generateTurn: async () => {
+        step++;
+        if (step === 1) {
+          return {
+            text: "",
+            functionCalls: [{ id: "fc_1", name: "analyze_fairness", args: {} }],
+          };
+        }
+        if (step === 2) {
+          return {
+            text: "",
+            functionCalls: [{ id: "fc_2", name: "apply_fair_distribution", args: { rebalance_quotas: true } }],
+          };
+        }
+        return { text: "تم فحص العدالة وتنفيذ التوزيع العادل بدون تعارضات." };
+      },
+    });
+    assert.equal(res19a.handled, true);
+    assert.deepEqual(res19a.tool_calls_used, ["analyze_fairness", "apply_fair_distribution"]);
+    assert.equal(res19a.should_solve, true);
+    assert.ok(res19a.updated_schedule && res19a.updated_schedule.entries.length > 0);
+    passed("19a. AI Tool Agent multi-step loop (analyze_fairness -> apply_fair_distribution)");
+  }
+
+  // 19b. AI Tool Call: query_teacher_details + apply_school_modifications (AVOID_FIRST)
+  {
+    const targetTeacher = school.teachers.find((t) =>
+      school.assignments.some((a) => a.teacher_id === t.id && a.weekly_periods > 0)
+    )!;
+    let step = 0;
+    const res19b = await runGeminiToolCallingAgent({
+      message: `الغي الحصة الأولى يوم الأحد للأستاذ ${targetTeacher.name}`,
+      school,
+      markdown: "",
+      schedule,
+      history,
+      generateTurn: async (_contents) => {
+        step++;
+        if (step === 1) {
+          return {
+            text: "",
+            functionCalls: [
+              {
+                id: "fc_mod",
+                name: "apply_school_modifications",
+                args: {
+                  ops: [
+                    {
+                      op: "add_placement_rule",
+                      teacher: targetTeacher.name,
+                      day: 0,
+                      type: "AVOID_FIRST",
+                      hard: true,
+                    },
+                  ],
+                },
+              },
+            ],
+          };
+        }
+        return { text: `تم إلغاء الحصة الأولى يوم الأحد للأستاذ ${targetTeacher.name}.` };
+      },
+    });
+    assert.equal(res19b.handled, true);
+    const updatedT = res19b.updated_school.teachers.find((t) => t.id === targetTeacher.id);
+    assert.ok(
+      updatedT?.work_pattern?.placement_rules?.some(
+        (r) => Number(r.day) === 0 && r.placement_type === "AVOID_FIRST"
+      ),
+      "AI tool call persisted AVOID_FIRST rule"
+    );
+    passed("19b. AI Tool Agent structured ops tool applies AVOID_FIRST deterministically");
+  }
+
+  // 19c. AI Tool Call: find_substitute_teacher + trigger_app_action
+  {
+    let step = 0;
+    const res19c = await runGeminiToolCallingAgent({
+      message: "مين فاضي يوم الأحد الحصة الثانية وبعدين صدر جدول المعلمين PDF",
+      school,
+      markdown: "",
+      schedule,
+      history,
+      generateTurn: async () => {
+        step++;
+        if (step === 1) {
+          return {
+            text: "",
+            functionCalls: [
+              { id: "fc_sub", name: "find_substitute_teacher", args: { day: 0, period: 2 } },
+              { id: "fc_act", name: "trigger_app_action", args: { action: "export_teachers_pdf" } },
+            ],
+          };
+        }
+        return { text: "تم تحديد المرشحين للاحتياط وفتح طباعة جدول المعلمين." };
+      },
+    });
+    assert.equal(res19c.handled, true);
+    assert.equal(res19c.ui_action, "export_teachers_pdf");
+    passed("19c. AI Tool Agent parallel tools (find_substitute_teacher + trigger_app_action)");
+  }
+
+  // 19d. AI Tool Agent graceful fallback when Gemini throws error
+  {
+    const res19d = await runGeminiToolCallingAgent({
+      message: "اي كلام",
+      school,
+      markdown: "",
+      schedule,
+      history,
+      generateTurn: async () => {
+        throw new Error("Simulated 503 outage");
+      },
+    });
+    assert.equal(res19d.handled, false);
+    assert.ok(res19d.error_notice?.includes("503"));
+    passed("19d. AI Tool Agent signals graceful fallback on API outage");
   }
 
   console.log("\nALL_HUMAN_E2E_AGENT_MEMORY_TESTS_PASSED");

@@ -44,6 +44,7 @@ import {
   executeGeminiParsedResponse,
   type AgentUiActionType,
 } from "./agentMemoryEngine.ts";
+import { runGeminiToolCallingAgent } from "./agentTools.ts";
 
 export const DEFAULT_BACKEND_URL = "";
 
@@ -547,7 +548,10 @@ export class HybridSchoolService {
     ui_action?: AgentUiActionType;
     ui_target_id?: string;
   }> {
-    // 1. Try server deterministic interpreter (which also resolves local .md file references in dev)
+    const hasKeys = ApiKeyManager.getKeys().length > 0;
+    const hasEnabledKeys = ApiKeyManager.getKeys().some((k) => k.enabled);
+
+    // 1. Try Backend Server API (runs Server Gemini Tool Agent first if configured, or local .md file loader)
     try {
       const res = await fetch(`${this.backendUrl}/api/ai/chat`, {
         method: "POST",
@@ -558,6 +562,7 @@ export class HybridSchoolService {
           schedule: schedule || null,
           markdown: markdown || null,
           history: history || [],
+          has_client_key: hasEnabledKeys,
         }),
       });
       if (res.ok && res.headers.get("content-type")?.includes("application/json")) {
@@ -567,59 +572,121 @@ export class HybridSchoolService {
         }
       }
     } catch {
-      // Continue to in-browser deterministic interpreter
+      // Offline / static browser mode continues directly below
     }
 
     const currentMarkdown = markdown || NESSCHINFO_RAW_TEXT;
-    // 2. In-browser deterministic command interpreter (for mutations/commands)
-    const isQuery = isQuestionOrInquiry(message);
-    const ctxMessage = enrichMessageWithMemoryContext(message, school, history);
-    if (!isQuery) {
-      // 2a. Full multi-line school import pasted directly into chat
-      if (message.trim().split(/\r?\n/).length >= 5 && message.trim().length >= 150) {
-        const hasMarkdownTables = /\|[^\n]+\|/.test(message);
-        if (!hasMarkdownTables) {
-          const unstructuredFull = parseUnstructuredArabicSchoolText(message);
-          if (unstructuredFull) {
-            return {
-              reply: `✓ ${unstructuredFull.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
-              updated_markdown: generateSchoolMarkdown(unstructuredFull.school, unstructuredFull.notes),
-              updated_school: unstructuredFull.school,
-              should_solve: true,
-              applied_changes: unstructuredFull.notes,
-              analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFull.school),
-            };
-          }
-        }
-        const parsedFull = parseSchoolText(message);
-        if (parsedFull.school && parsedFull.school.sections.length >= 2 && parsedFull.school.assignments.length >= 4) {
-          const msgChange = `استيراد مدرسة "${parsedFull.school.name}" (${parsedFull.school.sections.length} فصول، ${parsedFull.school.teachers.length} معلماً)`;
+
+    // 2. Fast deterministic path for huge pasted school tables or unstructured prose dumps
+    if (message.trim().split(/\r?\n/).length >= 5 && message.trim().length >= 150) {
+      const hasMarkdownTables = /\|[^\n]+\|/.test(message);
+      if (!hasMarkdownTables) {
+        const unstructuredFull = parseUnstructuredArabicSchoolText(message);
+        if (unstructuredFull) {
           return {
-            reply: `✓ تم ${msgChange} بنجاح، وجاري توليد الجدول فوراً.`,
-            updated_markdown: generateSchoolMarkdown(parsedFull.school, [msgChange]),
-            updated_school: parsedFull.school,
+            reply: `✓ ${unstructuredFull.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
+            updated_markdown: generateSchoolMarkdown(unstructuredFull.school, unstructuredFull.notes),
+            updated_school: unstructuredFull.school,
             should_solve: true,
-            applied_changes: [msgChange],
-            analysis: InBrowserSchoolEngine.analyzeSchool(parsedFull.school),
-          };
-        }
-        const unstructuredFallback = parseUnstructuredArabicSchoolText(message);
-        if (unstructuredFallback) {
-          return {
-            reply: `✓ ${unstructuredFallback.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
-            updated_markdown: generateSchoolMarkdown(unstructuredFallback.school, unstructuredFallback.notes),
-            updated_school: unstructuredFallback.school,
-            should_solve: true,
-            applied_changes: unstructuredFallback.notes,
-            analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFallback.school),
+            applied_changes: unstructuredFull.notes,
+            analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFull.school),
           };
         }
       }
+      const parsedFull = parseSchoolText(message);
+      if (parsedFull.school && parsedFull.school.sections.length >= 2 && parsedFull.school.assignments.length >= 4) {
+        const msgChange = `استيراد مدرسة "${parsedFull.school.name}" (${parsedFull.school.sections.length} فصول، ${parsedFull.school.teachers.length} معلماً)`;
+        return {
+          reply: `✓ تم ${msgChange} بنجاح، وجاري توليد الجدول فوراً.`,
+          updated_markdown: generateSchoolMarkdown(parsedFull.school, [msgChange]),
+          updated_school: parsedFull.school,
+          should_solve: true,
+          applied_changes: [msgChange],
+          analysis: InBrowserSchoolEngine.analyzeSchool(parsedFull.school),
+        };
+      }
+      const unstructuredFallback = parseUnstructuredArabicSchoolText(message);
+      if (unstructuredFallback) {
+        return {
+          reply: `✓ ${unstructuredFallback.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
+          updated_markdown: generateSchoolMarkdown(unstructuredFallback.school, unstructuredFallback.notes),
+          updated_school: unstructuredFallback.school,
+          should_solve: true,
+          applied_changes: unstructuredFallback.notes,
+          analysis: InBrowserSchoolEngine.analyzeSchool(unstructuredFallback.school),
+        };
+      }
+    }
+
+    // 3. AI-FIRST PRIORITY: Client-Side BYOK Gemini Tool-Calling Agent when browser key is active
+    let fallbackNotice = "";
+    if (hasEnabledKeys) {
+      try {
+        const toolRes = await runGeminiToolCallingAgent({
+          message,
+          school,
+          markdown: currentMarkdown,
+          schedule: schedule || null,
+          history: Array.isArray(history) ? history : [],
+          generateTurn: async (contents, config) => {
+            const { result, notices } = await ApiKeyManager.executeWithRotation(
+              async (client) => {
+                const response = await client.models.generateContent({
+                  model: DEFAULT_GEMINI_MODEL,
+                  contents,
+                  config: {
+                    systemInstruction: config.systemInstruction,
+                    tools: config.tools,
+                    maxOutputTokens: config.maxOutputTokens || 4096,
+                  },
+                });
+                return {
+                  text: response.text || "",
+                  functionCalls: response.functionCalls,
+                  modelContent: response.candidates?.[0]?.content as any,
+                };
+              },
+              { onNotice: this.onKeyNotice }
+            );
+            return { ...result, notices };
+          },
+        });
+        if (toolRes.handled) {
+          return {
+            reply: toolRes.reply,
+            updated_markdown: toolRes.updated_markdown,
+            updated_school: toolRes.updated_school,
+            updated_schedule: toolRes.updated_schedule || null,
+            should_solve: toolRes.should_solve,
+            applied_changes: toolRes.applied_changes,
+            ui_action: toolRes.ui_action,
+            ui_target_id: toolRes.ui_target_id,
+            analysis: InBrowserSchoolEngine.analyzeSchool(toolRes.updated_school),
+          };
+        }
+      } catch (err: unknown) {
+        if (err instanceof AllKeysFailedError) {
+          fallbackNotice = `\n⚠️ إشعار المفاتيح: ${err.message}`;
+        } else {
+          const safeErr = sanitizeSecretText(
+            err,
+            ApiKeyManager.getKeys().map((k) => k.key)
+          );
+          fallbackNotice = `\n⚠️ تعذر الاتصال بـ Gemini (${safeErr.slice(0, 90)}) — تم التحويل تلقائياً إلى المحرك المحلي.`;
+        }
+      }
+    }
+    const disabledKeysNotice = !hasEnabledKeys && hasKeys ? "\n💡 ملاحظة: جميع مفاتيح Gemini المضافة معطّلة حالياً؛ يعمل النظام عبر المحرك المحلي." : "";
+
+    // 4. Deterministic Local Engine Fallback (works 100% offline with zero keys)
+    const isQuery = isQuestionOrInquiry(message);
+    const ctxMessage = enrichMessageWithMemoryContext(message, school, history);
+    if (!isQuery) {
       const extAction = tryExecuteExtendedAgentAction(ctxMessage, school, schedule, history);
       if (extAction && extAction.handled) {
         const nextSchool = extAction.updated_school || school;
         return {
-          reply: extAction.reply,
+          reply: extAction.reply + fallbackNotice,
           updated_markdown: extAction.updated_markdown || currentMarkdown,
           updated_school: extAction.updated_school || school,
           updated_schedule: extAction.updated_schedule || null,
@@ -637,7 +704,7 @@ export class HybridSchoolService {
           updated_markdown: generateSchoolMarkdown(periodCmd.school, periodCmd.appliedChanges),
           applied_changes: periodCmd.appliedChanges,
           should_solve: true,
-          reply: periodCmd.reply,
+          reply: periodCmd.reply + fallbackNotice,
           analysis: InBrowserSchoolEngine.analyzeSchool(periodCmd.school),
         };
       }
@@ -678,7 +745,7 @@ export class HybridSchoolService {
         }
 
         return {
-          reply,
+          reply: reply + fallbackNotice,
           updated_markdown: updatedMarkdown,
           updated_school: updatedSchool,
           should_solve: shouldSolve,
@@ -687,12 +754,11 @@ export class HybridSchoolService {
         };
       }
 
-      // Also support pasting full unstructured Arabic school prose directly into chat in browser-only mode
       if (message.trim().length >= 120) {
         const unstructured = parseUnstructuredArabicSchoolText(message);
         if (unstructured) {
           return {
-            reply: `✓ ${unstructured.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.`,
+            reply: `✓ ${unstructured.notes[0]}\nجاري تحديث الجدول وإعادة التوزيع الآن.` + fallbackNotice,
             updated_markdown: generateSchoolMarkdown(unstructured.school, unstructured.notes),
             updated_school: unstructured.school,
             should_solve: true,
@@ -703,12 +769,11 @@ export class HybridSchoolService {
       }
     }
 
-    // 3. Deterministic Local School Q&A Assistant FIRST (exact quotas, off-days, vacancies, schedules, audit)
     const preAnalysis = InBrowserSchoolEngine.analyzeSchool(school);
     const localAns = answerSchoolQuestion(message, school, schedule, preAnalysis, history);
     if (localAns.answered) {
       return {
-        reply: localAns.reply,
+        reply: localAns.reply + fallbackNotice,
         updated_markdown: currentMarkdown,
         updated_school: school,
         should_solve: false,
@@ -717,107 +782,12 @@ export class HybridSchoolService {
       };
     }
 
-    // 4. Open-ended conversational request or novel mutation -> Client-Side BYOK Gemini with Schema Validation
-    let fallbackNotice = "";
-
-    const hasKeys = ApiKeyManager.getKeys().length > 0;
-    const hasEnabledKeys = ApiKeyManager.getKeys().some((k) => k.enabled);
-
-    if (hasEnabledKeys) {
-      try {
-        const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-        if (Array.isArray(history) && history.length > 0) {
-          for (const h of history.slice(-14)) {
-            if (h && h.text && h.role) {
-              contents.push({
-                role: h.role === "user" ? "user" : "model",
-                parts: [{ text: h.text }],
-              });
-            }
-          }
-        }
-
-        contents.push({
-          role: "user",
-          parts: [
-            {
-              text: `وثيقة المدرسة الحالية بصيغة Markdown:
-\`\`\`markdown
-${currentMarkdown}
-\`\`\`
-
-كائن بيانات المدرسة الحالي (SchoolData JSON):
-\`\`\`json
-${JSON.stringify(school)}
-\`\`\`
-${schedule ? `حالة الجدول الحالي: حل بنجاح (${schedule.entries.length} حصة مجدولة، مؤشر جودة ${schedule.quality_score}%، 0 تعارضات).` : "لم يتم إنشاء الجدول بعد."}
-${buildLiveAgentContextDigest(school, schedule, history)}
-
-طلب أو سؤال المستخدم:
-${message}
-
-المطلوب:
-إذا كان السؤال استفساراً أو طلباً للمعلومات أو محادثة، أجب بإجابة عربية وافية ودقيقة وضع "should_solve": false.
-إذا كان الطلب تعديلاً في الجدول، نفذ التعديل وضع "should_solve": true واذكر التغييرات.`,
-            },
-          ],
-        });
-
-        const { result: rawText, usedKey, notices } = await ApiKeyManager.executeWithRotation(
-          async (client) => {
-            const response = await client.models.generateContent({
-              model: DEFAULT_GEMINI_MODEL,
-              contents,
-              config: {
-                responseMimeType: "application/json",
-                maxOutputTokens: 16384,
-                systemInstruction: AGENT_SYSTEM_INSTRUCTION,
-              },
-            });
-            return response.text || "{}";
-          },
-          { onNotice: this.onKeyNotice }
-        );
-
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
-        const noticePrefix = notices.length > 0 ? `${notices.join("\n")}\n\n` : "";
-
-        if (parsed.reply || (Array.isArray(parsed.ops) && parsed.ops.length > 0)) {
-          const execRes = executeGeminiParsedResponse(school, currentMarkdown, parsed, validateSchoolDataSchema);
-          return {
-            reply: noticePrefix + execRes.reply,
-            updated_markdown: execRes.updated_markdown,
-            updated_school: execRes.updated_school,
-            should_solve: execRes.should_solve,
-            applied_changes: execRes.applied_changes,
-            analysis: InBrowserSchoolEngine.analyzeSchool(execRes.updated_school),
-          };
-        }
-      } catch (err: unknown) {
-        if (err instanceof AllKeysFailedError) {
-          fallbackNotice = `\n⚠️ إشعار المفاتيح: ${err.message}`;
-        } else {
-          const safeErr = sanitizeSecretText(
-            err,
-            ApiKeyManager.getKeys().map((k) => k.key)
-          );
-          fallbackNotice = `\n⚠️ تعذر الاتصال بـ Gemini (${safeErr.slice(0, 90)}) — تم التحويل تلقائياً إلى المحرك المحلي.`;
-        }
-      }
-    } else if (hasKeys) {
-      fallbackNotice =
-        "\n💡 ملاحظة: جميع مفاتيح Gemini المضافة معطّلة حالياً؛ يعمل النظام عبر المحرك المحلي.";
-    }
-
-    // 5. Fallback summary if no BYOK key or Gemini call could not answer
-
     return {
       reply:
         `أهلاً بك! بخصوص استفسارك عن مدرسة "${school.name}":\n` +
         `المدرسة تضم ${school.sections.length} فصول و${school.teachers.length} معلماً بإجمالي ${school.assignments.reduce((s, a) => s + a.weekly_periods, 0)} حصة أسبوعياً.\n` +
         `يمكنك سؤالي عن أنصبة أي معلم، أي يوم إجازة، جداول الفصول، أو طلب أي تعديل وسأنفذه فوراً.` +
-        fallbackNotice,
+        (fallbackNotice || disabledKeysNotice),
       updated_markdown: currentMarkdown,
       updated_school: school,
       should_solve: false,

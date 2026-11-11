@@ -43,6 +43,7 @@ import {
   sanitizePlacementRuleConflicts,
   executeGeminiParsedResponse,
 } from "./services/agentMemoryEngine.ts";
+import { runGeminiToolCallingAgent } from "./services/agentTools.ts";
 
 const PORT = 3000;
 const HOST = "0.0.0.0";
@@ -76,7 +77,7 @@ const geminiApiKey = SERVER_GEMINI_KEYS[0] || "";
 function sanitizeGeminiModel(m?: string): string {
   const model = (m || "").trim();
   if (!model || model === "gemini-flash-latest" || model === "gemini-1.5-flash" || model === "gemini-2.0-flash" || model === "gemini-2.5-flash") {
-    return "gemini-3.8-flash";
+    return "gemini-3.5-flash";
   }
   if (model === "gemini-flash-lite-latest" || model === "gemini-flash-lite" || model === "gemini-3.1-flash-lite" || model === "gemini-2.5-flash-lite") {
     return "gemini-3.5-flash-lite";
@@ -85,11 +86,14 @@ function sanitizeGeminiModel(m?: string): string {
 }
 
 const geminiModel = sanitizeGeminiModel(process.env.GEMINI_MODEL);
-const CANDIDATE_GEMINI_MODELS = [
+const BASE_CANDIDATE_GEMINI_MODELS = [
   geminiModel,
+  "gemini-3.5-flash",
   "gemini-3.8-flash",
-  "gemini-3.5-flash-lite", "gemini-2.5-flash",
+  "gemini-3.5-flash-lite",
 ].filter((m, i, arr) => arr.indexOf(m) === i);
+
+let preferredWorkingModel: string | null = null;
 
 function createServerGeminiClient(key: string) {
   return new GoogleGenAI({
@@ -107,7 +111,11 @@ const genAI = geminiApiKey ? createServerGeminiClient(geminiApiKey) : null;
 async function generateGeminiContentWithFallback(contents: any, config?: any) {
   if (SERVER_GEMINI_KEYS.length === 0) throw new Error("No Gemini client configured");
   let lastError: any = null;
-  for (const m of CANDIDATE_GEMINI_MODELS) {
+  const modelsOrder = preferredWorkingModel
+    ? [preferredWorkingModel, ...BASE_CANDIDATE_GEMINI_MODELS.filter((m) => m !== preferredWorkingModel)]
+    : BASE_CANDIDATE_GEMINI_MODELS;
+
+  for (const m of modelsOrder) {
     const maxAttempts = Math.min(2, SERVER_GEMINI_KEYS.length);
     for (let kIdx = 0; kIdx < maxAttempts; kIdx++) {
       const client = createServerGeminiClient(SERVER_GEMINI_KEYS[kIdx]);
@@ -117,13 +125,20 @@ async function generateGeminiContentWithFallback(contents: any, config?: any) {
           contents,
           config: {
             ...(config || {}),
-            abortSignal: AbortSignal.timeout(12000),
+            abortSignal: AbortSignal.timeout(8000),
           },
         });
+        preferredWorkingModel = m;
         return { response, usedModel: m };
       } catch (err: any) {
         lastError = err;
-        console.warn(`Attempt with key #${kIdx + 1} model '${m}' failed:`, err?.message || err);
+        const msg = String(err?.message || err);
+        console.warn(`Attempt with key #${kIdx + 1} model '${m}' failed:`, msg);
+        // If this model itself is overloaded/aborted/404, jump straight to next candidate model instead of re-waiting
+        if (/503|UNAVAILABLE|404|aborted|TimeoutError/i.test(msg)) {
+          if (preferredWorkingModel === m) preferredWorkingModel = null;
+          break;
+        }
       }
     }
   }
@@ -376,9 +391,9 @@ app.post("/api/schools/create-template", (req: Request, res: Response) => {
   });
 });
 
-// 4. Deterministic Timetable Command Interpreter & Conversational Copilot
+// 4. Hybrid AI-First Tool Calling Agent & Deterministic Local Fallback
 app.post("/api/ai/chat", async (req: Request, res: Response) => {
-  const { message, school, schedule, markdown, history } = req.body;
+  const { message, school, schedule, markdown, history, has_client_key, bypass_ai } = req.body;
   if (!message || !school) {
     return res.status(400).json({ error: "message and school are required" });
   }
@@ -386,6 +401,7 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
   const currentMarkdown = markdown || NESSCHINFO_RAW_TEXT;
 
   let effectiveMessage = message;
+  let loadedLocalFile = false;
   const fileMatch =
     message.match(/@?\[?([A-Za-z]:[\\\/][^\]\n\r]+\.md)\]?/i) ||
     message.match(/([A-Za-z]:[\\\/][^\s\n\r]+\.md)/i) ||
@@ -403,6 +419,7 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
         const fileContent = fs.readFileSync(candidatePath, "utf-8");
         if (fileContent && fileContent.length > 50) {
           effectiveMessage = fileContent;
+          loadedLocalFile = true;
         }
       } catch (e) {
         console.warn("Could not read referenced file in chat:", candidatePath, e);
@@ -410,13 +427,10 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
     }
   }
 
-  // Check if message is a conversational query or audit request
-  const isQuery = isQuestionOrInquiry(effectiveMessage);
-
-  // If not a query, check if deterministic mutation command interpreter recognizes it
-  const ctxMessage = enrichMessageWithMemoryContext(effectiveMessage, school, history);
-  if (!isQuery) {
-    if (effectiveMessage.trim().split(/\r?\n/).length >= 5 && effectiveMessage.trim().length >= 150) {
+  // Fast deterministic import for full school tables/prose pasted directly into chat
+  if (effectiveMessage.trim().split(/\r?\n/).length >= 5 && effectiveMessage.trim().length >= 150) {
+    const hasMarkdownTables = /\|[^\n]+\|/.test(effectiveMessage);
+    if (!hasMarkdownTables) {
       const unstructuredFull = parseUnstructuredArabicSchoolText(effectiveMessage);
       if (unstructuredFull) {
         return res.json({
@@ -430,6 +444,78 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
         });
       }
     }
+    const parsedFull = parseSchoolText(effectiveMessage);
+    if (parsedFull.school && parsedFull.school.sections.length >= 2 && parsedFull.school.assignments.length >= 4) {
+      const msgChange = `استيراد مدرسة "${parsedFull.school.name}" (${parsedFull.school.sections.length} فصول، ${parsedFull.school.teachers.length} معلماً)`;
+      return res.json({
+        understood: true,
+        reply: `✓ تم ${msgChange} بنجاح، وجاري توليد الجدول فوراً.`,
+        updated_markdown: generateSchoolMarkdown(parsedFull.school, [msgChange]),
+        updated_school: parsedFull.school,
+        should_solve: true,
+        applied_changes: [msgChange],
+        analysis: InBrowserSchoolEngine.analyzeSchool(parsedFull.school),
+      });
+    }
+  }
+
+  // Delegate to Client-Side BYOK Gemini Tool Agent if server has no key while user configured one in browser
+  if (!genAI && has_client_key && !bypass_ai && !loadedLocalFile) {
+    return res.json({
+      understood: false,
+      delegate_to_client_gemini: true,
+    });
+  }
+
+  // AI-FIRST PRIORITY: Route user message to Gemini Tool-Calling Agent when server Gemini key is active
+  if (genAI && !bypass_ai) {
+    try {
+      const toolResult = await runGeminiToolCallingAgent({
+        message: effectiveMessage,
+        school,
+        markdown: currentMarkdown,
+        schedule: schedule || null,
+        history: Array.isArray(history) ? history : [],
+        generateTurn: async (contents, config) => {
+          const { response } = await generateGeminiContentWithFallback(contents, {
+            systemInstruction: config.systemInstruction,
+            tools: config.tools,
+            maxOutputTokens: config.maxOutputTokens || 4096,
+          });
+          return {
+            text: response.text || "",
+            functionCalls: response.functionCalls,
+            modelContent: response.candidates?.[0]?.content as any,
+          };
+        },
+      });
+      if (toolResult.handled) {
+        return res.json({
+          understood: true,
+          reply: toolResult.reply,
+          updated_markdown: toolResult.updated_markdown,
+          updated_school: toolResult.updated_school,
+          updated_schedule: toolResult.updated_schedule || null,
+          should_solve: toolResult.should_solve,
+          applied_changes: toolResult.applied_changes,
+          ui_action: toolResult.ui_action,
+          ui_target_id: toolResult.ui_target_id,
+          tool_calls_used: toolResult.tool_calls_used,
+          mode: "gemini_tool_agent",
+          analysis: InBrowserSchoolEngine.analyzeSchool(toolResult.updated_school),
+        });
+      }
+    } catch (e) {
+      console.warn("Server Gemini Tool Agent failed, falling back to deterministic engine:", e);
+    }
+  }
+
+  // Fallback / Offline Deterministic Engine: check if message is a conversational query or audit request
+  const isQuery = isQuestionOrInquiry(effectiveMessage);
+
+  // If not a query, check if deterministic mutation command interpreter recognizes it
+  const ctxMessage = enrichMessageWithMemoryContext(effectiveMessage, school, history);
+  if (!isQuery) {
     const extAction = tryExecuteExtendedAgentAction(ctxMessage, school, schedule, history);
     if (extAction && extAction.handled) {
       const nextSchool = extAction.updated_school || school;
@@ -534,8 +620,8 @@ app.post("/api/ai/chat", async (req: Request, res: Response) => {
     });
   }
 
-  // 2. Open-ended requests or complex mutations via Server-Side Gemini (when configured)
-  if (genAI) {
+  // 2. Secondary Server-Side Gemini JSON fallback (only if Tool Agent was bypassed)
+  if (genAI && bypass_ai) {
     try {
       const geminiContents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
       if (Array.isArray(history) && history.length > 0) {
