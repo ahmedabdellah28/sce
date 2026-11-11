@@ -1141,17 +1141,18 @@ export default function App() {
           setStatusMessage(`تم تحديث وبناء الجدول بنجاح (${solved.schedule.entries.length} حصة · 0% تعارضات)!`);
         } else {
           const diffReport = dryRunMinimalChange(activeSchool, schedule, targetSchool);
+          const repairedSchedule = diffReport.preview_schedule;
+          setSchedule(repairedSchedule);
+          setPendingDiff(null);
+          setLastUpdatedTime(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }));
+          persistSchoolData(targetSchool, res.updated_markdown || rawText, repairedSchedule, res.analysis || analysis);
           if (diffReport.has_changes) {
-            setPendingDiff(diffReport);
             setActiveTab("timetable");
             setStatusMessage(
-              `تم احتساب التعديلات بأقل تغيير بنجاح! تم الحفاظ على ${diffReport.unchanged_count} حصة ثابتة، و ${diffReport.total_changes} حصة معدلة معروضة للمعاينة.`
+              `✅ تم تحديث الجدول تلقائياً بأقل تغيير! (حفظ ${diffReport.unchanged_count} حصة ثابتة وتحديث ${diffReport.total_changes} حصة — اكتب "تراجع" عند الحاجة)`
             );
           } else {
-            // Existing schedule already satisfies the new constraint/edit — keep it intact!
-            setPendingDiff(null);
-            persistSchoolData(targetSchool, res.updated_markdown || rawText, schedule, res.analysis || analysis);
-            setStatusMessage("✓ تم تنفيذ التعديل وحفظه؛ الجدول الحالي متوافق بالفعل دون حاجة لإعادة بناء.");
+            setStatusMessage("✓ تم تنفيذ التعديل وحفظه؛ الجدول الحالي متوافق بالفعل دون حاجة لتغيير أي حصة.");
           }
         }
       } else if (targetSchool && !(res as any).updated_schedule) {
