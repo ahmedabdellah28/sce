@@ -27,9 +27,17 @@ export interface AssistantAnswer {
  * rather than an imperative schedule modification command.
  */
 export function isQuestionOrInquiry(message: string): boolean {
-  const raw = message.trim();
-  if (raw.split(/\r?\n/).length >= 5 && raw.length >= 150) return false;
+  const raw = (message || "").trim();
+  if (!raw) return false;
   const n = normAr(raw);
+
+  // 1. What-If Simulation inquiries (ماذا لو، هل يمكن، لو نقلنا)
+  if (
+    /^(?:ماذا\s+لو|لو\s+اننا|لو\s+نقلنا|لو\s+بدلنا|لو\s+غيرنا|هل\s+لو|هل\s+يمكن|هل\s+ينفع|هل\s+يصلح|هل\s+يحدث\s+تعارض|جرب\s+تشوف)/.test(n) ||
+    /(?:هل\s+سيحدث\s+تعارض|هل\s+يتعارض|ما\s+رايك\s+لو|ايه\s+اللي\s+يحصل\s+لو)/.test(n)
+  ) {
+    return true;
+  }
 
   // Question marks
   if (/[?؟]/.test(raw)) return true;

@@ -32,12 +32,6 @@ import TimetableDiffPreview from "./components/TimetableDiffPreview.tsx";
 import { JadwalLogo } from "./components/JadwalLogo.tsx";
 import TeacherManagementHub from "./components/TeacherManagementHub.tsx";
 import { DAY_NAMES_AR, type SchoolData, type Schedule, type AnalysisReport, type TimetableEntry } from "./types.ts";
-import {
-  DEFAULT_CHAT_WELCOME_MESSAGE,
-  type ChatMessageRecord,
-  type SchoolUndoSnapshot,
-  type AgentUiActionType,
-} from "./services/agentMemoryEngine.ts";
 
 export interface SavedSchoolEntry {
   id: string;
@@ -46,8 +40,6 @@ export interface SavedSchoolEntry {
   raw_text: string;
   schedule?: Schedule | null;
   analysis?: AnalysisReport | null;
-  chat_history?: ChatMessageRecord[];
-  undo_stack?: SchoolUndoSnapshot[];
 }
 
 export interface CellPalette {
@@ -123,48 +115,8 @@ export function getSubjectPalette(subjectName: string = ""): CellPalette {
   return { ...RICH_PALETTES[Math.abs(hash) % RICH_PALETTES.length], icon: "📚" };
 }
 
-const DARK_CELL_PALETTES_BY_BG: Record<string, Omit<CellPalette, "icon">> = {
-  "#FEF3C7": { bg: "#3B2306", border: "#D97706", text: "#FDE68A", badgeBg: "#78350F", badgeText: "#FEF3C7" },
-  "#DBEAFE": { bg: "#172554", border: "#3B82F6", text: "#BFDBFE", badgeBg: "#1E3A8A", badgeText: "#DBEAFE" },
-  "#D1FAE5": { bg: "#063626", border: "#10B981", text: "#A7F3D0", badgeBg: "#065F46", badgeText: "#D1FAE5" },
-  "#CCFBF1": { bg: "#0B3534", border: "#14B8A6", text: "#99F6E4", badgeBg: "#115E59", badgeText: "#CCFBF1" },
-  "#FFE4E6": { bg: "#450A1B", border: "#F43F5E", text: "#FECDD3", badgeBg: "#881337", badgeText: "#FFE4E6" },
-  "#EDE9FE": { bg: "#2B1454", border: "#8B5CF6", text: "#DDD6FE", badgeBg: "#4C1D95", badgeText: "#EDE9FE" },
-  "#E0E7FF": { bg: "#1E1B4B", border: "#6366F1", text: "#C7D2FE", badgeBg: "#312E81", badgeText: "#E0E7FF" },
-  "#ECFCCB": { bg: "#1E330B", border: "#84CC16", text: "#D9F99D", badgeBg: "#365314", badgeText: "#ECFCCB" },
-  "#FFEDD5": { bg: "#421A06", border: "#F97316", text: "#FED7AA", badgeBg: "#7C2D12", badgeText: "#FFEDD5" },
-  "#FCE7F3": { bg: "#480B27", border: "#EC4899", text: "#FBCFE8", badgeBg: "#831843", badgeText: "#FCE7F3" },
-  "#F5D0FE": { bg: "#3D0E42", border: "#D946EF", text: "#F5D0FE", badgeBg: "#701A75", badgeText: "#FAE8FF" },
-  "#E0F2FE": { bg: "#0C2D42", border: "#0EA5E9", text: "#BAE6FD", badgeBg: "#075985", badgeText: "#E0F2FE" },
-  "#FFFBEB": { bg: "#3B2306", border: "#F59E0B", text: "#FDE68A", badgeBg: "#78350F", badgeText: "#FEF3C7" },
-  "#F1F5F9": { bg: "#1E293B", border: "#64748B", text: "#E2E8F0", badgeBg: "#334155", badgeText: "#F1F5F9" },
-  "#FEF9C3": { bg: "#3A2B06", border: "#EAB308", text: "#FEF08A", badgeBg: "#713F12", badgeText: "#FEF9C3" },
-  "#DCFCE7": { bg: "#08331B", border: "#22C55E", text: "#BBF7D0", badgeBg: "#14532D", badgeText: "#DCFCE7" },
-};
-
-function adaptCellPalette(pal: CellPalette, isDark: boolean): CellPalette {
-  if (!isDark) return pal;
-  const mapped = DARK_CELL_PALETTES_BY_BG[pal.bg];
-  if (mapped) return { ...mapped, icon: pal.icon };
-  return { bg: "#1E293B", border: "#64748B", text: "#E2E8F0", badgeBg: "#334155", badgeText: "#F1F5F9", icon: pal.icon };
-}
-
 
 export default function App() {
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    try {
-      return localStorage.getItem("JADWAL_THEME") === "dark" ? "dark" : "light";
-    } catch {
-      return "light";
-    }
-  });
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    try {
-      localStorage.setItem("JADWAL_THEME", theme);
-    } catch { }
-  }, [theme]);
-
   const [backendUrl] = useState(() => {
     const saved = localStorage.getItem("SCHEDULER_BACKEND_URL");
     return saved === "http://localhost:8000" ? "" : (saved ?? DEFAULT_BACKEND_URL);
@@ -264,6 +216,24 @@ export default function App() {
   const [selectedTeacherId, setSelectedTeacherId] = useState(() => initialActiveEntry?.school?.teachers[0]?.id || "TCH_RYA");
   const [selectedConstraintTeacherId, setSelectedConstraintTeacherId] = useState(() => initialActiveEntry?.school?.teachers[0]?.id || "TCH_RYA");
   const [selectedSwapEntry, setSelectedSwapEntry] = useState<TimetableEntry | null>(null);
+  const [selectedSwapPairedEntry, setSelectedSwapPairedEntry] = useState<TimetableEntry | null>(null);
+  const [selectedMergeCandidate, setSelectedMergeCandidate] = useState<TimetableEntry | null>(null);
+  const [userMergedPairs, setUserMergedPairs] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("JADWAL_USER_MERGED_PAIRS");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const [userUnmergedPairs, setUserUnmergedPairs] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("JADWAL_USER_UNMERGED_PAIRS");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
   const [pendingDiff, setPendingDiff] = useState<TimetableDiffReport | null>(null);
   const [colorMode, setColorMode] = useState<"subject" | "section">("subject");
   const [cellDensity, setCellDensity] = useState<"compact" | "balanced" | "spacious">("balanced");
@@ -537,40 +507,22 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [isChatSubmitting, setIsChatSubmitting] = useState(false);
   const [chatLoadingStep, setChatLoadingStep] = useState<1 | 2 | 3>(1);
-  const [chatHistory, setChatHistory] = useState<ChatMessageRecord[]>(() =>
-    Array.isArray(initialActiveEntry?.chat_history) && initialActiveEntry.chat_history.length > 0
-      ? initialActiveEntry.chat_history
-      : [DEFAULT_CHAT_WELCOME_MESSAGE]
-  );
-  const [undoStack, setUndoStack] = useState<SchoolUndoSnapshot[]>(() =>
-    Array.isArray(initialActiveEntry?.undo_stack) ? initialActiveEntry.undo_stack : []
-  );
-
-  // Persist active school chatHistory & undoStack automatically across refreshes
-  useEffect(() => {
-    if (!school?.id) return;
-    setSavedSchools((prev) => {
-      const idx = prev.findIndex((s) => s.id === school.id);
-      if (idx < 0) return prev;
-      const nextEntry = {
-        ...prev[idx],
-        chat_history: chatHistory.slice(-60),
-        undo_stack: undoStack.slice(-15),
-      };
-      const updated = [...prev];
-      updated[idx] = nextEntry;
-      try {
-        localStorage.setItem("AI_STUDIO_SAVED_SCHOOLS_V2", JSON.stringify(updated));
-      } catch {
-        // If quota exceeded, keep chat_history while trimming older undo snapshots
-        try {
-          const compact = updated.map((e) => ({ ...e, undo_stack: (e.undo_stack || []).slice(-3) }));
-          localStorage.setItem("AI_STUDIO_SAVED_SCHOOLS_V2", JSON.stringify(compact));
-        } catch {}
-      }
-      return updated;
-    });
-  }, [chatHistory, undoStack, school?.id]);
+  const [chatHistory, setChatHistory] = useState<
+    Array<{
+      role: "user" | "ai";
+      text: string;
+      changes?: string[];
+      isError?: boolean;
+      retryPrompt?: string;
+      timestamp?: string;
+    }>
+  >([
+    {
+      role: "ai",
+      text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي.\n\nأدِر بيانات المدرسة مباشرة: اطلب مني إعطاء إجازة لمعلم، تعديل أنصبة الحصص، أو تثبيت حصص أولى وأخيرة، وسأقوم فوراً بتحديث بيانات المدرسة وإعادة إنشاء الجدول تلقائياً بضمان 0% تعارضات.",
+      timestamp: "الآن",
+    },
+  ]);
 
 
   // RTL Layout: Collapsible & Resizable Right Chat Sidebar & Mobile Bottom Sheet
@@ -683,12 +635,6 @@ export default function App() {
       const localFound = savedSchools.find((s) => s.id === presetId);
       if (localFound) {
         setSchool(localFound.school);
-        setChatHistory(
-          Array.isArray(localFound.chat_history) && localFound.chat_history.length > 0
-            ? localFound.chat_history
-            : [DEFAULT_CHAT_WELCOME_MESSAGE]
-        );
-        setUndoStack(Array.isArray(localFound.undo_stack) ? localFound.undo_stack : []);
         setRawText(localFound.raw_text || "");
         const ana = localFound.analysis || InBrowserSchoolEngine.analyzeSchool(localFound.school);
         setAnalysis(ana);
@@ -705,8 +651,6 @@ export default function App() {
 
       const data = await service.loadPreset(presetId);
       setSchool(data.school);
-      setChatHistory([DEFAULT_CHAT_WELCOME_MESSAGE]);
-      setUndoStack([]);
       setRawText(data.raw_text || "");
       setAnalysis(data.analysis);
       const solved = InBrowserSchoolEngine.solveInBrowser(data.school);
@@ -813,9 +757,8 @@ export default function App() {
       setStatusMessage(`تم إنشاء "${createdSchool.name}" بنجاح (${createdSchool.sections.length} فصول، ${createdSchool.teachers.length} معلماً، ${createdSchool.assignments.length} تكليف)! يمكنك مراجعة الإسناد أو توليد الجدول مباشرة.`);
       setActiveTab(createdSchool.assignments.length > 0 ? "constraints" : "wizard");
 
-      setUndoStack([]);
-      setChatHistory([
-        DEFAULT_CHAT_WELCOME_MESSAGE,
+      setChatHistory((prev) => [
+        ...prev,
         {
           role: "ai",
           text: `تم إنشاء المدرسة الجديدة "${createdSchool.name}" بنجاح! تحتوي على ${createdSchool.sections.length} فصول و ${createdSchool.teachers.length} معلماً. اطلب مني أي تعديل أو اضغط على (إنشاء الجدول الآن).`,
@@ -882,8 +825,6 @@ export default function App() {
     setRawText(copyRawText);
     setAnalysis(copyAnalysis);
     setSchedule(null);
-    setUndoStack([]);
-    setChatHistory([DEFAULT_CHAT_WELCOME_MESSAGE]);
     setStatusMessage(`تم نسخ المدرسة بنجاح تحت اسم "${copyName}".`);
   }
 
@@ -951,63 +892,17 @@ export default function App() {
     const activeRawText = rawText || createBlankSchoolTemplate("مدرسة جديدة", 7).raw_text;
     const nowTime = new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
     setChatHistory((prev) => [...prev, { role: "user", text: msg, timestamp: nowTime }]);
-
-    // Real Snapshot Undo: handles "تراجع" / "الغي اخر تعديل" / "ارجع زي الاول" / "undo"
-    const isExactUndoReq = /^(?:تراجع(?:\s+عن\s+(?:اخر|آخر)\s*(?:تعديل|طلب|خطوة))?|الغي\s+(?:اخر|آخر)\s*(?:تعديل|طلب)|ارجع\s+(?:خطوة|زي\s+الاول|للخلف)|undo)$/i.test(
-      msg.replace(/[؟?!.،]/g, "").trim()
-    );
-    if (isExactUndoReq && undoStack.length > 0) {
-      const lastSnap = undoStack[undoStack.length - 1];
-      setUndoStack((prev) => prev.slice(0, -1));
-      setSchool(lastSnap.school);
-      const restoredMd = generateSchoolMarkdown(lastSnap.school);
-      setRawText(restoredMd);
-      const restoredAna = InBrowserSchoolEngine.analyzeSchool(lastSnap.school);
-      setAnalysis(restoredAna);
-      const restoredSchedule = lastSnap.schedule || InBrowserSchoolEngine.solveInBrowser(lastSnap.school).schedule;
-      setSchedule(restoredSchedule);
-      setPendingDiff(null);
-      persistSchoolData(lastSnap.school, restoredMd, restoredSchedule, restoredAna);
-      const undoReply = `↩️ تم التراجع الفوري بنجاح واستعادة الحالة السابقة قبل: (${lastSnap.label}).`;
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          role: "ai",
-          text: undoReply,
-          changes: [`التراجع عن: ${lastSnap.label}`],
-          timestamp: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
-        },
-      ]);
-      setStatusMessage(undoReply);
-      return;
-    }
-
     setIsChatSubmitting(true);
     setChatLoadingStep(1);
     setLoading(true);
     try {
       const res = await service.chatWithCopilot(msg, activeSchool, schedule, activeRawText, chatHistory);
       setChatLoadingStep(2);
-
-      const mutatedSchool = Boolean(res.updated_school && res.applied_changes && res.applied_changes.length > 0);
-      const mutatedSchedule = Boolean((res as any).updated_schedule);
-      if (mutatedSchool || mutatedSchedule) {
-        setUndoStack((prev) => [
-          ...prev.slice(-14),
-          {
-            school: activeSchool,
-            schedule: schedule || null,
-            label: res.applied_changes?.[0] || msg.slice(0, 60),
-            timestamp: nowTime,
-          },
-        ]);
-      }
-
       if (res.updated_markdown) setRawText(res.updated_markdown);
       const targetSchool = res.updated_school || activeSchool;
       if (res.updated_school) {
         setSchool(res.updated_school);
-        if (school && res.updated_school.id !== school.id) {
+        if (school && (res.updated_school.name !== school.name || res.updated_school.id !== school.id)) {
           const newEntry: SavedSchoolEntry = {
             id: res.updated_school.id,
             name: res.updated_school.name,
@@ -1025,25 +920,6 @@ export default function App() {
         }
       }
       if (res.analysis) setAnalysis(res.analysis);
-      if ((res as any).updated_schedule) {
-        const nextSched = (res as any).updated_schedule as Schedule;
-        setSchedule(nextSched);
-        setLastUpdatedTime(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }));
-        persistSchoolData(targetSchool, res.updated_markdown || rawText, nextSched, res.analysis || analysis);
-      }
-      // Trigger direct UI / Export / View actions requested in chat
-      const uiAct = (res as any).ui_action as AgentUiActionType | undefined;
-      const uiTarget = (res as any).ui_target_id as string | undefined;
-      if (uiAct) {
-        if (uiAct === "export_excel" && schedule) service.downloadExport("excel", targetSchool, schedule, "all").catch((e) => setErrorMessage(e.message));
-        else if (uiAct === "export_pdf_all" && schedule) service.downloadExport("pdf", targetSchool, schedule, "all").catch((e) => setErrorMessage(e.message));
-        else if (uiAct === "export_pdf_master" && schedule) service.downloadExport("pdf", targetSchool, schedule, "master").catch((e) => setErrorMessage(e.message));
-        else if (uiAct === "export_pdf_sections" && schedule) service.downloadExport("pdf", targetSchool, schedule, "sections").catch((e) => setErrorMessage(e.message));
-        else if (uiAct === "export_pdf_teachers" && schedule) service.downloadExport("pdf", targetSchool, schedule, "teachers").catch((e) => setErrorMessage(e.message));
-        else if (uiAct === "view_master") { setActiveTab("timetable"); setViewMode("master"); }
-        else if (uiAct === "view_section" && uiTarget) { setActiveTab("timetable"); setViewMode("section"); setSelectedSectionId(uiTarget); }
-        else if (uiAct === "view_teacher" && uiTarget) { setActiveTab("timetable"); setViewMode("teacher"); setSelectedTeacherId(uiTarget); }
-      }
       setChatHistory((prev) => [
         ...prev,
         {
@@ -1164,61 +1040,147 @@ export default function App() {
   function getSectionName(id: string) {
     return school?.sections.find((s) => s.id === id)?.name || id;
   }
-  const formatSection = (name: string) => (
-    <span dir="ltr" className="inline-block font-extrabold">
-      {name}
+  function getSectionCodeOnly(sectionIdOrName: string): string {
+    if (!sectionIdOrName) return "";
+    const sec = school?.sections.find(
+      (s) => s.id === sectionIdOrName || s.name === sectionIdOrName || s.code === sectionIdOrName
+    );
+    if (sec?.code && /^\d+[\/\\]\d+$/.test(sec.code.trim())) {
+      return sec.code.trim();
+    }
+    const raw = sec ? (sec.code || sec.name) : sectionIdOrName;
+    const m = raw.match(/\d+[\/\\]\d+/);
+    if (m) return m[0];
+    const cleaned = raw
+      .replace(/الصف\s*(?:الأول|الاول|الثاني|الثالث|الرابع|الخامس|السادس|\d+)(?:\s+(?:الثانوي|الإعدادي|الابتدائي))?/g, "")
+      .replace(/^فصل\s*/g, "")
+      .trim();
+    return cleaned || raw;
+  }
+  const formatSection = (nameOrId: string) => (
+    <span dir="ltr" className="inline-block font-extrabold tabular-nums">
+      {getSectionCodeOnly(nameOrId)}
     </span>
   );
   function getSectionPalette(sectionId: string): CellPalette {
-    if (!school) return adaptCellPalette(RICH_PALETTES[0], theme === "dark");
+    if (!school) return RICH_PALETTES[0];
     const idx = school.sections.findIndex((s) => s.id === sectionId);
-    return adaptCellPalette(RICH_PALETTES[(idx >= 0 ? idx : 0) % RICH_PALETTES.length], theme === "dark");
+    return RICH_PALETTES[(idx >= 0 ? idx : 0) % RICH_PALETTES.length];
   }
 
   function getCellPalette(entry: TimetableEntry): CellPalette {
     if (colorMode === "subject") {
-      return adaptCellPalette(getSubjectPalette(getSubjectName(entry.subject_id)), theme === "dark");
+      return getSubjectPalette(getSubjectName(entry.subject_id));
     }
     return getSectionPalette(entry.section_id);
   }
 
-  function isDoublePeriod(entry: TimetableEntry, allEntries: TimetableEntry[]): boolean {
-    return allEntries.some(
-      (other) =>
-        other.entry_id !== entry.entry_id &&
-        other.section_id === entry.section_id &&
-        other.teacher_id === entry.teacher_id &&
-        other.subject_id === entry.subject_id &&
-        other.day === entry.day &&
-        (other.period === entry.period + 1 || other.period === entry.period - 1)
+  function checkCanMerge(entryA: TimetableEntry, entryB: TimetableEntry): boolean {
+    return (
+      entryA.teacher_id === entryB.teacher_id &&
+      entryA.section_id === entryB.section_id &&
+      entryA.day === entryB.day &&
+      Math.abs(entryA.period - entryB.period) === 1
     );
   }
 
-  function handleCellSwapClick(entry: TimetableEntry, pairedEntry?: TimetableEntry) {
-    if (!selectedSwapEntry) {
-      setSelectedSwapEntry(entry);
-      setStatusMessage(
-        pairedEntry
-          ? `🔄 تم تحديد [${getSubjectName(entry.subject_id)} (ح ${entry.period}-${pairedEntry.period})]. انقر على حصة أخرى للمبادلة!`
-          : `🔄 تم تحديد [${getSubjectName(entry.subject_id)} (ح ${entry.period})]. انقر على حصة أخرى للمبادلة!`
-      );
-      return;
+  function getPairCoordKey(day: number, p1: number, p2: number, teacherId: string, sectionId: string): string {
+    const minP = Math.min(p1, p2);
+    const maxP = Math.max(p1, p2);
+    return `${teacherId}_${sectionId}_${day}_${minP}_${maxP}`;
+  }
+
+  function getPairKeys(a: TimetableEntry, b: TimetableEntry): [string, string] {
+    const coordKey = getPairCoordKey(a.day, a.period, b.period, a.teacher_id, a.section_id);
+    const idKey = [a.entry_id, b.entry_id].sort().join("__");
+    return [coordKey, idKey];
+  }
+
+  function shouldMergePair(a: TimetableEntry, b: TimetableEntry): boolean {
+    if (!checkCanMerge(a, b)) return false;
+    const [coordKey, idKey] = getPairKeys(a, b);
+
+    // If user explicitly split this pair:
+    if (userUnmergedPairs.has(coordKey) || userUnmergedPairs.has(idKey)) {
+      return false;
     }
 
-    if (selectedSwapEntry.entry_id === entry.entry_id) {
-      setSelectedSwapEntry(null);
-      setStatusMessage("تم إلغاء التحديد.");
-      return;
+    // If user explicitly merged this pair:
+    if (userMergedPairs.has(coordKey) || userMergedPairs.has(idKey)) {
+      return true;
     }
 
+    // Default automatic merge (same subject & global toggle on):
+    if (mergeDoublePeriods && a.subject_id === b.subject_id) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function handleMergePair(entryA: TimetableEntry, entryB: TimetableEntry) {
+    const [coordKey, idKey] = getPairKeys(entryA, entryB);
+    setUserMergedPairs((prev) => {
+      const next = new Set(prev);
+      next.add(coordKey);
+      next.add(idKey);
+      try {
+        localStorage.setItem("JADWAL_USER_MERGED_PAIRS", JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+    setUserUnmergedPairs((prev) => {
+      const next = new Set(prev);
+      next.delete(coordKey);
+      next.delete(idKey);
+      try {
+        localStorage.setItem("JADWAL_USER_UNMERGED_PAIRS", JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+    setSelectedSwapEntry(null);
+    setSelectedSwapPairedEntry(null);
+    setSelectedMergeCandidate(null);
+    const pMin = Math.min(entryA.period, entryB.period);
+    const pMax = Math.max(entryA.period, entryB.period);
+    setStatusMessage("✓ تم دمج الحصتين في كارد واحد بنجاح.");
+  }
+
+  function handleSplitPair(entryA: TimetableEntry, entryB: TimetableEntry) {
+    const [coordKey, idKey] = getPairKeys(entryA, entryB);
+    setUserUnmergedPairs((prev) => {
+      const next = new Set(prev);
+      next.add(coordKey);
+      next.add(idKey);
+      try {
+        localStorage.setItem("JADWAL_USER_UNMERGED_PAIRS", JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+    setUserMergedPairs((prev) => {
+      const next = new Set(prev);
+      next.delete(coordKey);
+      next.delete(idKey);
+      try {
+        localStorage.setItem("JADWAL_USER_MERGED_PAIRS", JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+    setSelectedSwapEntry(null);
+    setSelectedSwapPairedEntry(null);
+    setSelectedMergeCandidate(null);
+    setStatusMessage("✓ تم فك الدمج وإرجاع الحصتين ككاردين منفصلين.");
+  }
+
+  function executeSwap(entryA: TimetableEntry, entryB: TimetableEntry) {
     if (!school || !schedule) return;
     try {
       const swappedEntries = schedule.entries.map((e) => {
-        if (e.entry_id === selectedSwapEntry.entry_id) {
-          return { ...e, day: entry.day, period: entry.period };
+        if (e.entry_id === entryA.entry_id) {
+          return { ...e, day: entryB.day, period: entryB.period };
         }
-        if (e.entry_id === entry.entry_id) {
-          return { ...e, day: selectedSwapEntry.day, period: selectedSwapEntry.period };
+        if (e.entry_id === entryB.entry_id) {
+          return { ...e, day: entryA.day, period: entryA.period };
         }
         return e;
       });
@@ -1230,14 +1192,63 @@ export default function App() {
 
       const diff = calculateTimetableDiff(schedule, previewSchedule, school);
       setSelectedSwapEntry(null);
+      setSelectedSwapPairedEntry(null);
+      setSelectedMergeCandidate(null);
       if (diff) {
         setPendingDiff(diff);
         setStatusMessage("✅ تم احتساب التبديل! راجع المعاينة للاعتماد.");
       }
     } catch (err: any) {
       setSelectedSwapEntry(null);
+      setSelectedSwapPairedEntry(null);
+      setSelectedMergeCandidate(null);
       setErrorMessage(`خطأ أثناء المبادلة: ${err?.message || err}`);
     }
+  }
+
+  function isDoublePeriod(entry: TimetableEntry, allEntries: TimetableEntry[]): boolean {
+    return allEntries.some(
+      (other) =>
+        other.entry_id !== entry.entry_id &&
+        shouldMergePair(entry, other)
+    );
+  }
+
+  function handleCellSwapClick(entry: TimetableEntry, pairedEntry?: TimetableEntry) {
+    // 1. If clicked an ALREADY MERGED card -> immediately split into two cards!
+    if (pairedEntry) {
+      handleSplitPair(entry, pairedEntry);
+      return;
+    }
+
+    // 2. If nothing currently selected:
+    if (!selectedSwapEntry) {
+      setSelectedSwapEntry(entry);
+      setSelectedSwapPairedEntry(null);
+      setSelectedMergeCandidate(null);
+      setStatusMessage(
+        `🔄 تم تحديد [${getSubjectName(entry.subject_id)} - فصل ${getSectionCodeOnly(entry.section_id)}]. انقر على الحصة المتتالية لدمجهما في كارد واحد، أو على أي حصة أخرى للمبادلة.`
+      );
+      return;
+    }
+
+    // 3. If clicking the already selected single entry -> deselect
+    if (selectedSwapEntry.entry_id === entry.entry_id) {
+      setSelectedSwapEntry(null);
+      setSelectedSwapPairedEntry(null);
+      setSelectedMergeCandidate(null);
+      setStatusMessage("تم إلغاء التحديد.");
+      return;
+    }
+
+    // 4. If clicked entry is adjacent consecutive with SAME teacher & SAME section -> immediately merge!
+    if (checkCanMerge(selectedSwapEntry, entry)) {
+      handleMergePair(selectedSwapEntry, entry);
+      return;
+    }
+
+    // 5. Otherwise, normal swap between the two cells
+    executeSwap(selectedSwapEntry, entry);
   }
 
   const activeConstraintTeacher = useMemo(
@@ -1272,10 +1283,14 @@ export default function App() {
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={() => {
-              setChatHistory([DEFAULT_CHAT_WELCOME_MESSAGE]);
-              setUndoStack([]);
-            }}
+            onClick={() =>
+              setChatHistory([
+                {
+                  role: "ai",
+                  text: "مرحباً بك! أنا وكيل الجداول المدرسية الذكي.\n\nيمكنك طلب تعديل أي قيد أو إجازة لمعلم أو تبديل حصص بالعامية المصرية أو الخليجية وسأقوم بتحديث الجدول تلقائياً بضمان 0% تعارضات.",
+                },
+              ])
+            }
             className="text-[11px] text-stone-200 hover:text-white px-2 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 transition cursor-pointer"
             title="مسح سجل المحادثة والبدء من جديد"
             aria-label="مسح المحادثة"
@@ -1461,30 +1476,12 @@ export default function App() {
               </span>
             </div>
 
-            {/* Mobile Theme Switch & Menu Toggle */}
+            {/* Mobile Menu Toggle */}
             <div className="flex items-center gap-1.5 sm:hidden shrink-0">
               <button
                 type="button"
-                onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-                aria-label={theme === "dark" ? "التبديل إلى الوضع الفاتح" : "التبديل إلى الوضع الداكن"}
-                title={theme === "dark" ? "التبديل إلى الوضع الفاتح" : "التبديل إلى الوضع الداكن"}
-                className="min-h-[34px] min-w-[34px] bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] px-2 py-1.5 rounded-xl border border-[#E7E5E4] flex items-center justify-center transition cursor-pointer"
-              >
-                {theme === "dark" ? (
-                  <svg className="w-4 h-4 text-[#FBBF24]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
-                    <circle cx="12" cy="12" r="4" />
-                    <path strokeLinecap="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
-                  </svg>
-                ) : (
-                  <svg className="w-4 h-4 text-[#57534E]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" />
-                  </svg>
-                )}
-              </button>
-              <button
-                type="button"
                 onClick={() => setMobileHeaderMenuOpen(!mobileHeaderMenuOpen)}
-                className="min-h-[34px] bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[#E7E5E4] transition cursor-pointer"
+                className="bg-[#FAFAF9] hover:bg-[#E7E5E4] text-[#1C1917] text-xs font-bold px-2.5 py-1.5 rounded-xl border border-[#E7E5E4] transition cursor-pointer"
                 title="خيارات المدرسة والمفاتيح"
               >
                 {mobileHeaderMenuOpen ? "✕" : "القائمة"}
@@ -1669,41 +1666,6 @@ export default function App() {
               </svg>
               <span>تواصل</span>
             </a>
-
-            {/* Dual Light / Dark Theme Segmented Switch */}
-            <div className="hidden sm:inline-flex items-center bg-[#FAFAF9] border border-[#E7E5E4] rounded-xl p-0.5 shrink-0" role="group" aria-label="اختيار مظهر الواجهة">
-              <button
-                type="button"
-                onClick={() => setTheme("light")}
-                aria-pressed={theme === "light"}
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 transition cursor-pointer ${theme === "light"
-                  ? "bg-white text-[#1C1917] shadow-2xs border border-[#E7E5E4]"
-                  : "text-[#57534E] hover:text-[#1C1917]"
-                  }`}
-                title="الوضع الفاتح (وايت)"
-              >
-                <svg className="w-3.5 h-3.5 text-[#D97706] shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
-                  <circle cx="12" cy="12" r="4" />
-                  <path strokeLinecap="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
-                </svg>
-                <span>فاتح</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setTheme("dark")}
-                aria-pressed={theme === "dark"}
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center gap-1 transition cursor-pointer ${theme === "dark"
-                  ? "bg-[#292524] text-[#FAF9F7] shadow-2xs border border-[#57534E]"
-                  : "text-[#57534E] hover:text-[#1C1917]"
-                  }`}
-                title="الوضع الداكن (دارك)"
-              >
-                <svg className="w-3.5 h-3.5 text-[#A78BFA] shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" />
-                </svg>
-                <span>داكن</span>
-              </button>
-            </div>
 
             {/* AI Keys Pill */}
             <button
@@ -2451,25 +2413,98 @@ export default function App() {
 
           {activeTab === "timetable" && school && (
             <div className="bg-[#FFFFFF] rounded-xl border border-[#E7E5E4] p-5 space-y-4">
-              {/* Swap Mode Notification Bar */}
+              {/* Swap, Merge, and Split Notification Bar */}
               {selectedSwapEntry && (
-                <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-[#EDE9FE] border border-[#8B5CF6] text-[#6D28D9] rounded-xl shadow-sm text-xs font-bold">
-                  <div className="flex items-center gap-2">
-                    <span className="text-base motion-safe:animate-bounce">🔄</span>
-                    <span>
-                      وضع تبديل الحصص نشط: تم تحديد [{getSubjectName(selectedSwapEntry.subject_id)} - {getSectionName(selectedSwapEntry.section_id)} ({DAY_NAMES_AR[selectedSwapEntry.day]} ح {selectedSwapEntry.period})]. انقر على أي حصة أخرى في الجدول لتبديل المكانين فوراً بدون تعارض!
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSwapEntry(null);
-                      setStatusMessage("تم إلغاء تحديد الحصة.");
-                    }}
-                    className="bg-white/20 hover:bg-white/30 text-white px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition shrink-0"
-                  >
-                    إلغاء المبادلة ✕
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl shadow-sm text-xs font-bold transition-all border bg-[#EDE9FE] border-[#8B5CF6] text-[#6D28D9]">
+                  {selectedSwapPairedEntry ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🔗</span>
+                        <span>
+                          تم تحديد كارد مدمج: [{getSubjectName(selectedSwapEntry.subject_id)} - فصل {getSectionCodeOnly(selectedSwapEntry.section_id)}].
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleSplitPair(selectedSwapEntry, selectedSwapPairedEntry)}
+                          className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg text-xs font-black transition cursor-pointer shadow-xs flex items-center gap-1"
+                        >
+                          <span>فك الدمج</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSwapEntry(null);
+                            setSelectedSwapPairedEntry(null);
+                            setSelectedMergeCandidate(null);
+                            setStatusMessage("تم إلغاء التحديد.");
+                          }}
+                          className="bg-white/80 hover:bg-white text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
+                        >
+                          إلغاء ✕
+                        </button>
+                      </div>
+                    </>
+                  ) : selectedMergeCandidate ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🔗</span>
+                        <span>
+                          تم تحديد حصتين متتاليتين لنفس المعلم والفصل.
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleMergePair(selectedSwapEntry, selectedMergeCandidate)}
+                          className="bg-[#0F766E] hover:bg-[#115E59] text-white px-3.5 py-1.5 rounded-lg text-xs font-black transition cursor-pointer shadow-xs flex items-center gap-1"
+                        >
+                          <span>دمج الحصتين في كارد واحد</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => executeSwap(selectedSwapEntry, selectedMergeCandidate)}
+                          className="bg-white/80 hover:bg-white text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
+                        >
+                          تبديل 🔄
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedSwapEntry(null);
+                            setSelectedSwapPairedEntry(null);
+                            setSelectedMergeCandidate(null);
+                            setStatusMessage("تم إلغاء التحديد.");
+                          }}
+                          className="bg-white/80 hover:bg-white text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
+                        >
+                          إلغاء ✕
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base motion-safe:animate-bounce">🔄</span>
+                        <span>
+                          وضع تحديد الحصص: تم تحديد [{getSubjectName(selectedSwapEntry.subject_id)} - فصل {getSectionCodeOnly(selectedSwapEntry.section_id)} ({DAY_NAMES_AR[selectedSwapEntry.day]} ح {selectedSwapEntry.period})]. انقر على الحصة المتتالية لدمجهما في كارد واحد، أو انقر على أي حصة أخرى للمبادلة!
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSwapEntry(null);
+                          setSelectedSwapPairedEntry(null);
+                          setSelectedMergeCandidate(null);
+                          setStatusMessage("تم إلغاء تحديد الحصة.");
+                        }}
+                        className="bg-white/20 hover:bg-white/30 text-white px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition shrink-0"
+                      >
+                        إلغاء ✕
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -2848,19 +2883,25 @@ export default function App() {
                   const isSelectedForSwap =
                     selectedSwapEntry?.entry_id === entry.entry_id ||
                     (pairedEntry && selectedSwapEntry?.entry_id === pairedEntry.entry_id);
+                  const isSelectedMergeCandidate =
+                    selectedMergeCandidate?.entry_id === entry.entry_id;
+                  const isMergeEligible = Boolean(
+                    selectedSwapEntry &&
+                    !selectedSwapPairedEntry &&
+                    !pairedEntry &&
+                    entry.entry_id !== selectedSwapEntry.entry_id &&
+                    checkCanMerge(selectedSwapEntry, entry)
+                  );
+                  const isMergedCard = isDouble && pairedEntry;
                   const isMatch = isEntrySearchMatch(entry) || (pairedEntry && isEntrySearchMatch(pairedEntry));
                   const subjectName = getSubjectName(entry.subject_id);
-                  const secObj = school.sections.find((s) => s.id === entry.section_id);
-                  const gradeObj = secObj ? school.grades.find((g) => g.id === secObj.grade_id) : undefined;
-                  const gradeLabel = gradeObj?.name || "";
-                  const sectionCodeOnly = formatSection(getSectionName(entry.section_id));
+                  const cleanSecCode = getSectionCodeOnly(entry.section_id);
+                  const sectionCodeOnly = formatSection(cleanSecCode);
                   const secondaryLabel =
                     secondaryType === "section"
                       ? sectionCodeOnly
                       : getTeacherName(entry.teacher_id);
-                  const periodRange = isDouble && pairedEntry ? `ح ${entry.period}-${pairedEntry.period}` : `ح ${entry.period}`;
-                  const gradePrefix = gradeLabel ? `${gradeLabel} · ` : "";
-                  const hoverTooltip = `${gradePrefix}فصل ${getSectionName(entry.section_id)} · ${subjectName} (${DAY_NAMES_AR[entry.day]} ${periodRange})${entry.is_pinned ? " [مثبت]" : ""} — انقر للمبادلة، كليك يمين للتثبيت`;
+                  const hoverTooltip = `[${cleanSecCode}] ${subjectName} (${DAY_NAMES_AR[entry.day]})${entry.is_pinned ? " [مثبت]" : ""}`;
 
                   if (compactSectionOnly) {
                     return (
@@ -2872,29 +2913,32 @@ export default function App() {
                         }}
                         className={`w-full h-full rounded-lg flex items-center justify-center font-black transition-all duration-150 cursor-pointer select-none relative border ${isChangedCell
                           ? "ring-2 ring-[#8B5CF6] border-dashed border-[#6D28D9] motion-safe:animate-pulse"
-                          : isSelectedForSwap
+                          : isSelectedForSwap || isSelectedMergeCandidate
                             ? "ring-2 ring-[#0F766E] scale-[1.04] shadow-md z-20"
-                            : !isMatch && timetableSearch
-                              ? "opacity-25 grayscale-[60%]"
-                              : isMatch && timetableSearch
-                                ? "ring-2 ring-[#0F766E] shadow-xs z-10"
-                                : "hover:brightness-95"
+                            : isMergeEligible
+                              ? "ring-2 ring-indigo-500 border-dashed animate-pulse z-20"
+                              : !isMatch && timetableSearch
+                                ? "opacity-25 grayscale-[60%]"
+                                : isMatch && timetableSearch
+                                  ? "ring-2 ring-[#0F766E] shadow-xs z-10"
+                                  : "hover:brightness-95"
                           }`}
                         style={{
-                          backgroundColor: isChangedCell ? (theme === "dark" ? "#2E1065" : "#EDE9FE") : pal.bg,
-                          borderColor: entry.is_pinned ? "#0F766E" : isChangedCell ? "#8B5CF6" : isSelectedForSwap ? "#0F766E" : pal.border,
+                          backgroundColor: isChangedCell ? "#EDE9FE" : pal.bg,
+                          borderColor: entry.is_pinned ? "#0F766E" : isChangedCell ? "#8B5CF6" : isSelectedForSwap || isSelectedMergeCandidate ? "#0F766E" : isMergeEligible ? "#6366F1" : pal.border,
                           borderWidth: entry.is_pinned ? "2px" : "1px",
-                          color: isChangedCell ? (theme === "dark" ? "#DDD6FE" : "#6D28D9") : pal.text,
+                          color: isChangedCell ? "#6D28D9" : pal.text,
                         }}
                         title={hoverTooltip}
                       >
                         <span className="text-[11px] font-black leading-none tracking-tight tabular-nums">
                           {sectionCodeOnly}
                         </span>
-                        {entry.is_pinned && (
+
+                        {entry.is_pinned && !isMergedCard && (
                           <span className="absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-[#0F766E]" aria-label="مثبت" />
                         )}
-                        {isChangedCell && (
+                        {isChangedCell && !isMergedCard && (
                           <span className="absolute bottom-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-[#6D28D9]" aria-label="معدل" />
                         )}
                       </div>
@@ -2906,31 +2950,27 @@ export default function App() {
                       onClick={() => handleCellSwapClick(entry, pairedEntry)}
                       className={`w-full h-full rounded-xl flex flex-col justify-between transition-all duration-150 cursor-pointer select-none relative border shadow-2xs hover:shadow-md ${isChangedCell
                         ? "ring-2 ring-[#8B5CF6] border-dashed border-[#6D28D9] motion-safe:animate-pulse"
-                        : isSelectedForSwap
+                        : isSelectedForSwap || isSelectedMergeCandidate
                           ? "ring-3 ring-[#0F766E] scale-[1.03] shadow-lg z-20"
-                          : !isMatch && timetableSearch
-                            ? "opacity-30 grayscale-[50%]"
-                            : isMatch && timetableSearch
-                              ? "ring-2 ring-[#0F766E] scale-[1.01] shadow-sm z-10"
-                              : "hover:scale-[1.01]"
+                          : isMergeEligible
+                            ? "ring-2 ring-indigo-500 border-dashed animate-pulse z-20"
+                            : !isMatch && timetableSearch
+                              ? "opacity-30 grayscale-[50%]"
+                              : isMatch && timetableSearch
+                                ? "ring-2 ring-[#0F766E] scale-[1.01] shadow-sm z-10"
+                                : "hover:scale-[1.01]"
                         } ${densityConfig.cellPadding}`}
                       style={{
-                        backgroundColor: isChangedCell ? (theme === "dark" ? "#2E1065" : "#EDE9FE") : pal.bg,
-                        borderColor: isChangedCell ? "#8B5CF6" : isSelectedForSwap ? "#0F766E" : pal.border,
-                        color: isChangedCell ? (theme === "dark" ? "#DDD6FE" : "#6D28D9") : pal.text,
+                        backgroundColor: isChangedCell ? "#EDE9FE" : pal.bg,
+                        borderColor: isChangedCell ? "#8B5CF6" : isSelectedForSwap || isSelectedMergeCandidate ? "#0F766E" : isMergeEligible ? "#6366F1" : pal.border,
+                        color: isChangedCell ? "#6D28D9" : pal.text,
                       }}
                       title={hoverTooltip}
                     >
                       {/* Top Header inside cell */}
                       <div className="flex items-center justify-between w-full gap-1">
                         <div className="flex items-center gap-1.5 leading-tight font-extrabold truncate">
-                          {isDouble && pairedEntry ? (
-                            <span className={`${densityConfig.primaryText} truncate tracking-tight`}>
-                              {subjectName} <span className="text-[9.5px] font-bold opacity-75">(مزدوجة ح{entry.period}-{pairedEntry.period})</span>
-                            </span>
-                          ) : (
-                            <span className={`${densityConfig.primaryText} truncate`}>{subjectName}</span>
-                          )}
+                          <span className={`${densityConfig.primaryText} truncate`}>{subjectName}</span>
                         </div>
                         <button
                           type="button"
@@ -2960,7 +3000,7 @@ export default function App() {
                       {/* Bottom Footer inside cell */}
                       <div className="flex items-center justify-between w-full gap-1 mt-auto">
                         <span
-                          className={`${densityConfig.badgeText} rounded-md font-bold truncate max-w-[75%] border border-black/5`}
+                          className={`${densityConfig.badgeText} rounded-md font-bold truncate max-w-[70%] border border-black/5`}
                           style={{
                             backgroundColor: pal.badgeBg,
                             color: pal.badgeText,
@@ -2969,15 +3009,7 @@ export default function App() {
                           {secondaryLabel}
                         </span>
 
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          {!isDouble && isDoublePeriod(entry, activeSchedule.entries) && (
-                            <span
-                              className="text-[8.5px] font-black bg-white/95 text-slate-800 px-1 py-0.2 rounded border border-slate-300 shadow-2xs"
-                              title="حصة مزدوجة متصلة"
-                            >
-                              مزدوجة
-                            </span>
-                          )}
+                        <div className="flex items-center gap-1 shrink-0">
                           {isChangedCell && (
                             <span className="bg-[#6D28D9] text-white text-[10px] px-1.5 py-0.2 rounded font-extrabold" aria-label="حصة معدلة">
                               معدل
@@ -3117,7 +3149,7 @@ export default function App() {
                                           let isDoubleStart = false;
                                           let pairedEntry: TimetableEntry | undefined = undefined;
 
-                                          if (entry && mergeDoublePeriods) {
+                                          if (entry) {
                                             const nextP = p + 1;
                                             if (nextP <= dayPeriods) {
                                               const next = activeSchedule.entries.find(
@@ -3125,10 +3157,9 @@ export default function App() {
                                                   e.teacher_id === tch.id &&
                                                   e.day === d &&
                                                   e.period === nextP &&
-                                                  e.section_id === entry.section_id &&
-                                                  e.subject_id === entry.subject_id
+                                                  e.section_id === entry.section_id
                                               );
-                                              if (next) {
+                                              if (next && shouldMergePair(entry, next)) {
                                                 isDoubleStart = true;
                                                 pairedEntry = next;
                                                 consumedPeriods.add(nextP);
@@ -3194,7 +3225,7 @@ export default function App() {
                                           let isDoubleStart = false;
                                           let pairedEntry: TimetableEntry | undefined = undefined;
 
-                                          if (entry && mergeDoublePeriods) {
+                                          if (entry) {
                                             const nextP = p + 1;
                                             if (nextP <= dayPeriods) {
                                               const next = activeSchedule.entries.find(
@@ -3202,10 +3233,9 @@ export default function App() {
                                                   e.section_id === sec.id &&
                                                   e.day === d &&
                                                   e.period === nextP &&
-                                                  e.teacher_id === entry.teacher_id &&
-                                                  e.subject_id === entry.subject_id
+                                                  e.teacher_id === entry.teacher_id
                                               );
-                                              if (next) {
+                                              if (next && shouldMergePair(entry, next)) {
                                                 isDoubleStart = true;
                                                 pairedEntry = next;
                                                 consumedPeriods.add(nextP);
@@ -3252,13 +3282,13 @@ export default function App() {
                             >
                               {school.sections.map((s) => (
                                 <option key={s.id} value={s.id}>
-                                  {s.name}
+                                  {getSectionCodeOnly(s.id)}
                                 </option>
                               ))}
                             </select>
                           </div>
                           <span className="text-xs font-extrabold text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
-                            جدول الفصل ({formatSection((school.sections.find((s) => s.id === selectedSectionId) || school.sections[0])?.name || "")})
+                            جدول فصل {formatSection(selectedSectionId)}
                           </span>
                         </div>
 
@@ -3322,7 +3352,7 @@ export default function App() {
                                             let isDoubleStart = false;
                                             let pairedEntry: TimetableEntry | undefined = undefined;
 
-                                            if (entry && mergeDoublePeriods) {
+                                            if (entry) {
                                               const nextP = p + 1;
                                               if (nextP <= limit) {
                                                 const next = activeSchedule.entries.find(
@@ -3330,10 +3360,9 @@ export default function App() {
                                                     e.section_id === sec.id &&
                                                     e.day === d &&
                                                     e.period === nextP &&
-                                                    e.teacher_id === entry.teacher_id &&
-                                                    e.subject_id === entry.subject_id
+                                                    e.teacher_id === entry.teacher_id
                                                 );
-                                                if (next) {
+                                                if (next && shouldMergePair(entry, next)) {
                                                   isDoubleStart = true;
                                                   pairedEntry = next;
                                                   consumedPeriods.add(nextP);
@@ -3373,7 +3402,7 @@ export default function App() {
                                   </div>
                                   <div className="flex flex-wrap items-center gap-2">
                                     {summaryList.map((item) => {
-                                      const pal = adaptCellPalette(getSubjectPalette(item.subName), theme === "dark");
+                                      const pal = getSubjectPalette(item.subName);
                                       return (
                                         <span
                                           key={item.subId}
@@ -3480,7 +3509,7 @@ export default function App() {
                                               let isDoubleStart = false;
                                               let pairedEntry: TimetableEntry | undefined = undefined;
 
-                                              if (entry && mergeDoublePeriods) {
+                                              if (entry) {
                                                 const nextP = p + 1;
                                                 if (nextP <= count) {
                                                   const next = activeSchedule.entries.find(
@@ -3488,10 +3517,9 @@ export default function App() {
                                                       e.teacher_id === tch.id &&
                                                       e.day === d &&
                                                       e.period === nextP &&
-                                                      e.section_id === entry.section_id &&
-                                                      e.subject_id === entry.subject_id
+                                                      e.section_id === entry.section_id
                                                   );
-                                                  if (next) {
+                                                  if (next && shouldMergePair(entry, next)) {
                                                     isDoubleStart = true;
                                                     pairedEntry = next;
                                                     consumedPeriods.add(nextP);
@@ -3561,7 +3589,7 @@ export default function App() {
       </div>
 
       {/* Executive Footer: Copyright & Creator Contact */}
-      <footer className="max-w-[1850px] mx-auto px-4 sm:px-6 pb-20 lg:pb-4 pt-1">
+      <footer className="max-w-[1850px] mx-auto px-4 sm:px-6 pb-4 pt-1">
         <div className="bg-[#FFFFFF] border border-[#E7E5E4] rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[#57534E]">
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -3591,53 +3619,53 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Sleek Floating Mobile AI Assistant Pill (< lg only) */}
-      {!isMobileSheetOpen && (
-        <div className="lg:hidden fixed bottom-4 end-4 z-40">
-          <button
-            type="button"
-            onClick={() => setIsMobileSheetOpen(true)}
-            aria-label="وكيل الجداول الذكي (طلب تعديل بالعامية)"
-            title="وكيل الجداول الذكي (طلب تعديل بالعامية)"
-            className="group min-h-[46px] h-12 ps-2 pe-3.5 rounded-full bg-[#1C1917] hover:bg-[#292524] active:scale-95 text-white border border-white/15 dark:border-[#14B8A6]/45 shadow-[0_12px_28px_-6px_rgba(28,25,23,0.45),0_4px_12px_rgba(15,118,110,0.28)] dark:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.8),0_0_0_1px_rgba(20,184,166,0.25)] flex items-center gap-2.5 transition-all duration-200 cursor-pointer"
-          >
-            <span className="relative w-8 h-8 rounded-full bg-gradient-to-br from-[#0F766E] via-[#0D9488] to-[#6D28D9] flex items-center justify-center shrink-0 ring-1 ring-white/25" aria-hidden="true">
-              <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M11 2L13.09 8.26L19 10.5L13.09 12.74L11 19L8.91 12.74L3 10.5L8.91 8.26L11 2ZM19 14L20.05 16.95L23 18L20.05 19.05L19 22L17.95 19.05L15 18L17.95 16.95L19 14Z" />
-              </svg>
-              <span
-                className={`absolute -top-0.5 -end-0.5 w-2.5 h-2.5 rounded-full bg-[#10B981] ring-2 ring-[#1C1917] ${isChatSubmitting ? "animate-pulse" : ""}`}
-              />
+      {/* Executive Floating Agent Action Button on Mobile (< lg only) */}
+      <div className="lg:hidden fixed bottom-5 end-4 z-40 pointer-events-auto">
+        <button
+          type="button"
+          onClick={() => setIsMobileSheetOpen((prev) => !prev)}
+          className="group flex items-center gap-2.5 bg-gradient-to-r from-[#0F766E] to-[#115E59] text-white font-black text-xs ps-3.5 pe-4 py-2.5 rounded-full shadow-2xl shadow-teal-950/30 border border-teal-400/30 hover:brightness-110 active:scale-95 transition-all duration-200 cursor-pointer"
+          aria-label="وكيل الجداول الذكي (طلب تعديل بالعامية)"
+          title="وكيل الجداول الذكي (طلب تعديل بالعامية)"
+        >
+          <span className="relative flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-white shadow-inner shrink-0">
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            <span className="absolute -top-0.5 -end-0.5 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-200 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
             </span>
-            <span className="flex items-center gap-1.5 whitespace-nowrap">
-              <span className="text-[13px] font-extrabold tracking-tight text-white">المساعد الذكي</span>
-              <span
-                dir="ltr"
-                className="text-[10px] font-black tracking-wider px-1.5 py-0.5 rounded-full bg-[#EDE9FE] text-[#5B21B6] leading-none"
-              >
-                AI
-              </span>
-            </span>
-          </button>
-        </div>
-      )}
+          </span>
+          <span className="flex flex-col items-start leading-tight">
+            <span className="text-xs font-black tracking-tight">الوكيل الذكي</span>
+            <span className="text-[9.5px] font-bold text-teal-100">تعديل بالعامية</span>
+          </span>
+        </button>
+      </div>
 
       {isMobileSheetOpen && (
         <div
-          className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end bg-[#1C1917]/65"
+          className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end bg-black/75 transition-opacity duration-200"
           role="dialog"
           aria-modal="true"
           aria-label="وكيل الجداول الذكي"
         >
-          <div className="bg-[#FFFFFF] rounded-t-3xl shadow-2xl max-h-[88vh] h-[82vh] flex flex-col overflow-hidden border-t border-[#E7E5E4] w-full">
+          {/* Click-outside backdrop to dismiss */}
+          <div
+            className="absolute inset-0"
+            onClick={() => setIsMobileSheetOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="relative bg-[#FFFFFF] rounded-t-3xl shadow-2xl max-h-[88vh] h-[84vh] flex flex-col overflow-hidden border-t border-[#E7E5E4] w-full z-10">
             <button
               type="button"
-              className="p-2.5 flex justify-center bg-[#FAFAF9] border-b border-[#E7E5E4] cursor-pointer hover:bg-[#E7E5E4] transition"
+              className="py-2 flex justify-center bg-[#FAFAF9] border-b border-[#E7E5E4] cursor-pointer hover:bg-[#E7E5E4] transition shrink-0"
               onClick={() => setIsMobileSheetOpen(false)}
               title="إغلاق وطي المحادثة"
               aria-label="إغلاق المحادثة"
             >
-              <div className="w-12 h-1.5 bg-[#57534E]/50 rounded-full" />
+              <div className="w-10 h-1 bg-[#57534E]/40 rounded-full" />
             </button>
             <div className="flex-1 min-h-0 flex flex-col">
               {renderChatPanelContent(true)}
