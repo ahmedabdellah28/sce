@@ -547,6 +547,21 @@ async function runHumanFirstTimeSimulation() {
     }
   }
 
+  // 19g. Compound Add Teacher + Replace vacancy slot ('اضف معلم علي كمال واستبدل س3 به')
+  {
+    const s3Teacher = school.teachers.find((t) => /س\s*3/.test(t.name));
+    if (s3Teacher) {
+      const s3Count = school.assignments.filter((a) => a.teacher_id === s3Teacher.id).length;
+      const r19g = await browserService.chatWithCopilot("اضف معلم علي كمال واستبدل س3 به", school, schedule, "", history);
+      assert.equal(r19g.should_solve, true);
+      const ali = r19g.updated_school?.teachers.find((t) => t.name.includes("علي كمال"));
+      const oldStill = r19g.updated_school?.teachers.find((t) => t.id === s3Teacher.id);
+      const aliAsgs = r19g.updated_school?.assignments.filter((a) => a.teacher_id === ali?.id).length || 0;
+      assert.ok(ali && !oldStill && aliAsgs === s3Count && aliAsgs > 0, `Compound add+replace failed: ${r19g.reply}`);
+      passed("19g. Compound add teacher + replace vacancy slot ('اضف معلم علي كمال واستبدل س3 به')");
+    }
+  }
+
   console.log("\nALL_HUMAN_E2E_AGENT_MEMORY_TESTS_PASSED");
 }
 

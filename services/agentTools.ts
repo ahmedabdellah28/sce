@@ -40,6 +40,7 @@ export const AI_TOOL_AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Au
 3. الترتيب الصحيح للأولويات:
    - لا تدّعِ أبداً أنك نفذت تعديلاً (مثل تغيير اسم المدرسة أو إجازة أو قيد أو توزيع) بدون استدعاء أداة التعديل أولاً (\`apply_school_modifications\` أو \`run_domain_command\` أو \`apply_fair_distribution\`).
    - لتغيير اسم المدرسة استدعِ \`apply_school_modifications\` مع \`ops: [{ op: "set_school_name", name: "الاسم الجديد" }]\`.
+   - لإضافة معلم جديد واستبدال معلم أو خانة شاغرة به (مثل "أضف معلم علي كمال واستبدل س3 به" أو "شيل س1 وحط X"): استدعِ \`apply_school_modifications\` مع \`ops: [{ op: "replace_teacher", teacher: "س3", replacement: "علي كمال" }]\` (تضيف المعلم وتنقل جميع حصص س3 إليه تلقائياً).
    - للاستفسارات والحسابات الدقيقة وجداول المعلمين/الفصول: استدعِ \`get_school_overview\` أو \`query_teacher_details\` أو \`query_section_details\` أو \`ask_exact_school_math\`.
    - لمعرفة احتياط/بديل لحصة محددة: استدعِ \`find_substitute_teacher\`.
    - لتقييم عدالة التوزيع: استدعِ \`analyze_fairness\`. ولتنفيذ التوزيع العادل فعلياً عند طلب المستخدم أو تأكيده: استدعِ \`apply_fair_distribution\`.
@@ -565,6 +566,15 @@ ${message}`,
           if (normalizedOps.length > 0) {
             const resOps = applyOps(workingBeforeOps, normalizedOps);
             finalSchool = sanitizePlacementRuleConflicts(resOps.school, normalizedOps);
+            // Sync teacher.subject_ids after assignment/replacement ops
+            for (const tch of finalSchool.teachers) {
+              const assignedSubs = [
+                ...new Set(finalSchool.assignments.filter((a) => a.teacher_id === tch.id).map((a) => a.subject_id)),
+              ];
+              if (assignedSubs.length > 0) {
+                tch.subject_ids = [...new Set([...(tch.subject_ids || []), ...assignedSubs])];
+              }
+            }
             localChanges.push(...resOps.changes);
             errors.push(...resOps.errors);
           }

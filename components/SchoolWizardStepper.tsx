@@ -789,7 +789,7 @@ export default function SchoolWizardStepper({
                     value={school.name}
                     onChange={(e) => updateSchool((prev) => ({ ...prev, name: e.target.value }))}
                     className="w-full border border-[#E7E5E4] rounded-lg px-3 py-2 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
-                    placeholder="مثال: مدرسة المستقبل الابتدائية"
+                    placeholder="اسم المدرسة..."
                   />
                 </div>
                 <div>
@@ -1051,7 +1051,7 @@ export default function SchoolWizardStepper({
                       handleQuickAddCustomSubject();
                     }
                   }}
-                  placeholder="أو اكتب اسم مادة أخرى لإضافتها (مثال: خط، نشاط رياضي، تربية وطنية)..."
+                  placeholder="إضافة مادة مخصصة..."
                   className="flex-1 min-w-[220px] border border-[#E7E5E4] rounded-lg px-3 py-1.5 text-xs font-bold bg-white text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                 />
                 <button
@@ -1511,8 +1511,8 @@ export default function SchoolWizardStepper({
                       rows={7}
                       value={bulkTeachersText}
                       onChange={(e) => setBulkTeachersText(e.target.value)}
-                      placeholder={"أحمد محمود\nسيد عبد العال\nمنى إبراهيم\nحسام حسن"}
-                      className="w-full border border-[#D6D3D1] rounded-xl p-3 text-xs font-bold bg-white text-[#1C1917] placeholder:text-[#57534E] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
+                      placeholder="اسم في كل سطر..."
+                      className="w-full border border-[#D6D3D1] rounded-xl p-3 text-xs font-bold bg-white text-[#1C1917] placeholder:font-normal placeholder:text-[#A8A29E] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                     />
                   </div>
 

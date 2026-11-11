@@ -932,7 +932,9 @@ export function answerSchoolQuestion(
   // -------------------------------------------------------------
   // 8B. Deficit / Shortage Teachers Inquiries ("س" / "س1" / "س2" / "عجز")
   // -------------------------------------------------------------
-  if (/(عجز|العجز|شاغر|خانات شاغر[ةه]|معن[يى] س|(?:^|\s)س(?:\s*\d+|\s+[\u0600-\u06FF]+)?(?:\s|$)|نقص الحصص)/.test(n)) {
+  const isMutationForDeficitSlot =
+    /(?:^|\s)(?:اضف|أضف|ضيف|استبدل|بد[ّ]?ل|شيل|حط|عي[ّ]?ن|اسند|احذف|امسح|انقل|حرك)(?:\s|$)/.test(n);
+  if (!isMutationForDeficitSlot && /(عجز|العجز|شاغر|خانات شاغر[ةه]|معن[يى] س|(?:^|\s)س(?:\s*\d+|\s+[\u0600-\u06FF]+)?(?:\s|$)|نقص الحصص)/.test(n)) {
     const deficitTeachers = school.teachers.filter(
       (t) => t.name.includes("شاغر") || t.name.includes("عجز") || /^(?:س(?:\s|$)|س\s*\d|س\s+[\u0600-\u06FF]+)/.test(normAr(t.name))
     );

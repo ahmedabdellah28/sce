@@ -203,9 +203,18 @@ body {
     color: #78716C;
   }
 
+  input::placeholder,
+  textarea::placeholder {
+    font-weight: 400;
+    color: #A8A29E;
+    opacity: 0.85;
+  }
+
   html.dark input::placeholder,
   html.dark textarea::placeholder {
-    color: #A8A29E;
+    font-weight: 400;
+    color: #78716C;
+    opacity: 0.9;
   }
 
   /* Brand Teal Soft Surfaces */

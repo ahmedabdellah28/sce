@@ -872,6 +872,63 @@ export function tryExecuteExtendedAgentAction(
     }
   }
 
+  // 4D2. Compound Add Teacher + Replace ("اضف معلم علي كمال واستبدل س3 به" / "استبدل س3 بعلي كمال")
+  {
+    let newTeacherName = "";
+    let oldTeacherRef = "";
+
+    const addReplaceM = message.match(
+      /(?:اضف|أضف|ضيف)\s+(?:ال)?(?:معلم|معلمه|معلمة|مدرس|مدرسه|مدرسة|استاذ|أستاذ)?\s*([^\n،,.]+?)\s+(?:و\s*)?(?:استبدل|بدل|شيل|حط[ه]?\s*مكان|احذف)\s+(?:ال)?(?:معلم|معلمه|معلمة|مدرس|استاذ|أستاذ)?\s*([^\n،,.]+?)(?:\s+(?:به|بها|مكانه|مكانها|بداله|بدلها|عنه))?[.!؛\s]*$/i
+    );
+    const directReplaceM = message.match(
+      /(?:استبدل|بد[ّ]?ل|شيل|احذف|عي[ّ]?ن\s*مكان)\s+(?:ال)?(?:معلم|معلمه|معلمة|مدرس|استاذ|أستاذ)?\s*([^\n،,.]+?)\s+(?:وحط\s*مكانه|ونزل\s*مكانه|وبداله|مكانه|بدال|بدلا\s*منه|بالأستاذ|بالاستاذ|بالمعلم|بـ\s*|ب\s+|ب(?=[\u0600-\u06FF]))\s*(?:ال)?(?:معلم|معلمه|معلمة|مدرس|استاذ|أستاذ)?\s*([^\n،,.]+?)[.!؛\s]*$/i
+    );
+
+    if (addReplaceM) {
+      newTeacherName = addReplaceM[1].trim();
+      oldTeacherRef = addReplaceM[2].trim();
+    } else if (directReplaceM && !/(?:^|\s)(?:به|بها|مكانه|بداله)(?:\s|$)/.test(directReplaceM[2])) {
+      oldTeacherRef = directReplaceM[1].trim();
+      newTeacherName = directReplaceM[2].trim();
+    }
+
+    if (newTeacherName && oldTeacherRef) {
+      const oldT =
+        school.teachers.find((t) => normAr(t.name) === normAr(oldTeacherRef)) ||
+        school.teachers.find((t) => {
+          const nOld = normAr(oldTeacherRef);
+          const nT = normAr(t.name);
+          return nT === nOld || nT.startsWith(nOld + " ") || nT.includes(nOld);
+        });
+      if (oldT && normAr(newTeacherName) !== normAr(oldT.name)) {
+        const resOps = applyOps(school, [
+          { op: "replace_teacher", teacher: oldT.name, replacement: newTeacherName },
+        ]);
+        if (resOps.errors.length === 0 && resOps.changes.length > 0) {
+          // Ensure replacement teacher's subject_ids includes all transferred assignment subjects
+          const repTch = resOps.school.teachers.find(
+            (t) => normAr(t.name) === normAr(newTeacherName) || normAr(t.name).includes(normAr(newTeacherName))
+          );
+          if (repTch) {
+            const transferredSubs = [
+              ...new Set(resOps.school.assignments.filter((a) => a.teacher_id === repTch.id).map((a) => a.subject_id)),
+            ];
+            repTch.subject_ids = [...new Set([...(repTch.subject_ids || []), ...transferredSubs])];
+          }
+          const summaryMsg = resOps.changes.map((c) => `✓ ${c}`).join("\n");
+          return {
+            handled: true,
+            reply: `${summaryMsg}\nوجاري تحديث الجدول تلقائياً بضمان 0% تعارضات.`,
+            updated_school: resOps.school,
+            updated_markdown: generateSchoolMarkdown(resOps.school, resOps.changes),
+            should_solve: true,
+            applied_changes: resOps.changes,
+          };
+        }
+      }
+    }
+  }
+
   // 4E. Rename Teacher ("عدل اسم المعلم علاء إلى الأستاذ علاء منصور")
   const renTchM = message.match(
     /(?:غير|عدل|بدل)\s+اسم\s+(?:ال)?(?:معلم|معلمه|معلمة|مدرس|مدرسه|مدرسة|استاذ|أستاذ)\s+(.+?)\s+(?:الى|إلى|لـ)\s+(.+)$/i

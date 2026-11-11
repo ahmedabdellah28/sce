@@ -325,8 +325,8 @@ export default function TeacherManagementHub({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleAddNewTeacher();
                 }}
-                placeholder="مثال: أ. أحمد محمود"
-                className="w-full bg-white border border-[#D6D3D1] rounded-lg px-3 py-2 text-xs font-bold text-[#1C1917] placeholder:text-[#57534E] focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]"
+                placeholder="اسم المعلم..."
+                className="w-full bg-white border border-[#D6D3D1] rounded-lg px-3 py-2 text-xs font-bold text-[#1C1917] placeholder:font-normal placeholder:text-[#A8A29E] focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]"
                 autoFocus
               />
             </div>
@@ -411,8 +411,8 @@ export default function TeacherManagementHub({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ابحث بالاسم أو المادة..."
-                className="w-full bg-[#FAFAF9] border border-[#D6D3D1] rounded-lg px-3 py-2 pe-8 text-xs text-[#1C1917] placeholder:text-[#57534E] focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]"
+                placeholder="بحث..."
+                className="w-full bg-[#FAFAF9] border border-[#D6D3D1] rounded-lg px-3 py-2 pe-8 text-xs text-[#1C1917] placeholder:font-normal placeholder:text-[#A8A29E] focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]"
               />
               {searchQuery && (
                 <button

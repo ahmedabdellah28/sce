@@ -1553,22 +1553,22 @@ export default function App() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Clean Conversational Input Area at Bottom */}
-      <div className="p-3 border-t border-[#E7E5E4] bg-[#FFFFFF] shrink-0">
-        <div className="flex gap-2">
+      {/* Modern 2026 Conversational Composer */}
+      <div className="p-2.5 sm:p-3 border-t border-[#E7E5E4] bg-[#FFFFFF] shrink-0">
+        <div className="flex items-center gap-1.5 rounded-2xl border border-[#D6D3D1] bg-[#FAFAF9] p-1.5 shadow-2xs transition-all focus-within:bg-[#FFFFFF] focus-within:border-[#0F766E] focus-within:ring-2 focus-within:ring-[#0F766E]/20">
           <input
             type="text"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSendChat()}
-            placeholder="اطلب تعديلاً أو اسأل عن الجدول..."
-            className="flex-1 min-w-0 border border-[#D6D3D1] rounded-xl px-3 py-2 text-xs font-bold text-[#1C1917] focus:ring-2 focus:ring-[#0F766E] focus:outline-none placeholder:text-[#57534E] bg-[#FFFFFF]"
+            placeholder="اكتب طلبك..."
+            className="flex-1 min-w-0 bg-transparent px-2.5 py-1.5 text-xs font-semibold text-[#1C1917] focus:outline-none placeholder:font-normal placeholder:text-[#A8A29E]"
           />
           <button
             type="button"
             onClick={() => handleSendChat()}
             disabled={loading || !chatInput.trim()}
-            className="min-h-[38px] bg-[#0F766E] hover:bg-[#115E59] disabled:opacity-50 text-white font-extrabold px-4 py-2 rounded-xl text-xs shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+            className="min-h-[34px] bg-[#0F766E] hover:bg-[#115E59] disabled:opacity-40 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
           >
             <span>إرسال</span>
           </button>
@@ -1960,7 +1960,7 @@ export default function App() {
                       type="text"
                       value={newKeyAlias}
                       onChange={(e) => setNewKeyAlias(e.target.value)}
-                      placeholder="مثال: حسابي الشخصي 1"
+                      placeholder="اسم المفتاح..."
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
@@ -1999,7 +1999,7 @@ export default function App() {
                   dir="ltr"
                   value={bulkKeysInput}
                   onChange={(e) => setBulkKeysInput(e.target.value)}
-                  placeholder={"AIzaSyExampleKeyOne1111\nAIzaSyExampleKeyTwo2222\nمشروع 3: AIzaSyExampleKeyThree3333"}
+                  placeholder="الصق مفاتيحك (مفتاح في كل سطر)..."
                   className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-mono bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <div className="flex justify-end">
@@ -2139,7 +2139,7 @@ export default function App() {
                 </label>
                 <input
                   type="text"
-                  placeholder="مثال: مدرسة المستقبل الابتدائية / مدرسة الفاروق الإعدادية..."
+                  placeholder="اسم المدرسة..."
                   value={newSchoolName}
                   onChange={(e) => setNewSchoolName(e.target.value)}
                   className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -2321,7 +2321,7 @@ export default function App() {
                     rows={4}
                     value={newSchoolAiPrompt}
                     onChange={(e) => setNewSchoolAiPrompt(e.target.value)}
-                    placeholder="مثال: مدرسة الأمل التجريبية بها 6 فصول للمرحلة الابتدائية، معلمين للغة العربية والإنجليزية والعلوم، الأحد إلى الخميس 7 حصص يومياً..."
+                    placeholder="صف المدرسة: المراحل، الفصول، المواد، والأيام..."
                     className="w-full border rounded-lg p-2.5 text-xs bg-white focus:outline-none"
                   />
                 </div>
@@ -2555,7 +2555,7 @@ export default function App() {
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
                 className="w-full border border-[#E7E5E4] rounded-xl p-3 text-xs font-mono bg-[#FAFAF9] text-[#1C1917] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
-                placeholder="الصق هنا نص بيانات المدرسة..."
+                placeholder="الصق نص أو جدول المدرسة..."
               />
               <div className="flex flex-wrap gap-2">
                 <button
@@ -2785,8 +2785,8 @@ export default function App() {
                       type="text"
                       value={timetableSearch}
                       onChange={(e) => setTimetableSearch(e.target.value)}
-                      placeholder="ابحث عن معلم أو مادة أو فصل..."
-                      className="w-full ps-8 pe-8 py-1.5 bg-[#FFFFFF] border border-[#D6D3D1] rounded-xl text-xs font-bold text-[#1C1917] placeholder:text-[#57534E] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
+                      placeholder="بحث..."
+                      className="w-full ps-8 pe-8 py-1.5 bg-[#FFFFFF] border border-[#D6D3D1] rounded-xl text-xs font-semibold text-[#1C1917] placeholder:font-normal placeholder:text-[#A8A29E] focus:outline-none focus:ring-2 focus:ring-[#0F766E]"
                     />
                     {timetableSearch && (
                       <button
