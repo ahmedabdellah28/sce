@@ -46,7 +46,7 @@ export const AI_TOOL_AGENT_SYSTEM_INSTRUCTION = `# الهوية والدور (Au
    - لأسئلة "ماذا لو / هل ينفع": استدعِ \`simulate_what_if\` فقط دون تعديل المدرسة، واعرض النتيجة بوضوح واسأل المستخدم إذا كان يريد التنفيذ.
    - للتعديلات المهيكلة (إجازات، قواعد الحصص، أولى/أخيرة، منع حصة مثل "الغاء الحصة الاولى"، حد يومي/تتابع، مزدوج/فردي، إسناد، إضافة/حذف/تبديل معلم أو فصل أو مادة، اسم المدرسة): استدعِ \`apply_school_modifications\` بالأوبس المناسبة.
    - للتثبيت أو التبديل أو النقل بين الخلايا أو الحذف/النصيب بصفوف أو تعديل عدد حصص صف يوم معين أو التراجع: استدعِ \`run_domain_command\` بنص واضح محدد.
-   - لطلبات التصدير (PDF / Excel) أو فتح شاشة معينة أو توليد الجدول: استدعِ \`trigger_app_action\`.
+   - لطلبات التصدير (PDF / Excel) أو فتح شاشة معينة: استدعِ \`trigger_app_action\`. ولا تستدعِ \`trigger_solve\` أبداً في الاستفسارات أو تغيير اسم المدرسة أو التعديلات البسيطة إلا إذا طلب المستخدم صراحةً بناء/إعادة توليد الجدول كله.
 4. للطلبات الغامضة جداً التي قد تغير عشرات الحصص دون تحديد (مثل "ثبت حصة العربي" دون فصل أو يوم أو معلم، أو "انقل حصة" دون تحديد أي حصة): لا تنفذ تعديلاً؛ اسأل المستخدم سؤالاً توضيحياً قصيراً محدداً بالخيارات المتاحة من بيانات المدرسة.
 5. في الصياغات العربية انتبه للنفي دائماً:
    - "الغاء/منع/عدم/إعفاء الحصة الأولى يوم X" تعني \`AVOID_FIRST\` (وليس \`FIRST_N\`).
@@ -573,7 +573,14 @@ ${message}`,
             workingSchool = finalSchool;
             appliedChanges.push(...localChanges);
             workingMarkdown = generateSchoolMarkdown(workingSchool, appliedChanges);
-            shouldSolve = true;
+            const metadataOnlyOps = new Set(["set_school_name", "rename_teacher", "add_subject", "note"]);
+            const hasSchedulingImpact = rawOps.some((r: any) => {
+              const name = String(r?.op || "");
+              if (metadataOnlyOps.has(name)) return false;
+              if (name === "add_teacher" && !r?.work_days?.length && !r?.off_days?.length) return false;
+              return true;
+            });
+            if (hasSchedulingImpact) shouldSolve = true;
           }
 
           const cap = validateSchoolCapacity(workingSchool);

@@ -1071,16 +1071,18 @@ export default function App() {
           timestamp: new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }),
         },
       ]);
-      if (res.should_solve && targetSchool) {
+      if (res.should_solve && targetSchool && !(res as any).updated_schedule) {
         setChatLoadingStep(3);
-        const isExplicitRefresh = /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء|حل|وزع|سو جدول)\s*(?:ل)?(?:ال)?جدول/.test(msg.trim());
+        const isExplicitRefresh =
+          (res as any).ui_action === "trigger_solve" ||
+          /^(?:من فضلك\s+|لو سمحت\s+|ممكن\s+)?(?:حدث|تحديث|اعمل تحديث|اعد تحديث|جدد|ابني|إعادة بناء|حل|وزع|سو جدول)\s*(?:ل)?(?:ال)?جدول/.test(msg.trim());
         const structureChanged =
           targetSchool.periods_per_day !== activeSchool.periods_per_day ||
+          targetSchool.sections.length !== activeSchool.sections.length ||
           JSON.stringify(targetSchool.days) !== JSON.stringify(activeSchool.days) ||
           JSON.stringify(targetSchool.sections.map((s) => s.daily_period_limits || null)) !==
             JSON.stringify(activeSchool.sections.map((s) => s.daily_period_limits || null));
-        const diffReport = dryRunMinimalChange(activeSchool, schedule, targetSchool);
-        if (!schedule || isExplicitRefresh || structureChanged || !diffReport.has_changes) {
+        if (!schedule || isExplicitRefresh || structureChanged) {
           const solved = InBrowserSchoolEngine.solveInBrowser(targetSchool);
           setSchedule(solved.schedule);
           setValidation(solved.validation);
@@ -1091,13 +1093,21 @@ export default function App() {
           setActiveTab("timetable");
           setStatusMessage(`تم تحديث وبناء الجدول بنجاح (${solved.schedule.entries.length} حصة · 0% تعارضات)!`);
         } else {
-          setPendingDiff(diffReport);
-          setActiveTab("timetable");
-          setStatusMessage(
-            `تم احتساب التعديلات بأقل تغيير بنجاح! تم الحفاظ على ${diffReport.unchanged_count} حصة ثابتة، و ${diffReport.total_changes} حصة معدلة معروضة للمعاينة.`
-          );
+          const diffReport = dryRunMinimalChange(activeSchool, schedule, targetSchool);
+          if (diffReport.has_changes) {
+            setPendingDiff(diffReport);
+            setActiveTab("timetable");
+            setStatusMessage(
+              `تم احتساب التعديلات بأقل تغيير بنجاح! تم الحفاظ على ${diffReport.unchanged_count} حصة ثابتة، و ${diffReport.total_changes} حصة معدلة معروضة للمعاينة.`
+            );
+          } else {
+            // Existing schedule already satisfies the new constraint/edit — keep it intact!
+            setPendingDiff(null);
+            persistSchoolData(targetSchool, res.updated_markdown || rawText, schedule, res.analysis || analysis);
+            setStatusMessage("✓ تم تنفيذ التعديل وحفظه؛ الجدول الحالي متوافق بالفعل دون حاجة لإعادة بناء.");
+          }
         }
-      } else if (targetSchool) {
+      } else if (targetSchool && !(res as any).updated_schedule) {
         persistSchoolData(targetSchool, res.updated_markdown || rawText, schedule, res.analysis || analysis);
       }
     } catch (e: any) {

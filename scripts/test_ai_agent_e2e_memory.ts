@@ -8,6 +8,7 @@ import { getBuiltInSchool376, InBrowserSchoolEngine } from "../services/localEng
 import { parseUnstructuredArabicSchoolText } from "../services/unstructuredParser.ts";
 import { DEFAULT_CHAT_WELCOME_MESSAGE, type ChatMessageRecord } from "../services/agentMemoryEngine.ts";
 import { getOrderedSchoolDays } from "../presets/commonPresets.ts";
+import { dryRunMinimalChange } from "../services/diffEngine.ts";
 import { runGeminiToolCallingAgent, AGENT_TOOL_DECLARATIONS } from "../services/agentTools.ts";
 
 function passed(label: string) {
@@ -486,6 +487,64 @@ async function runHumanFirstTimeSimulation() {
     assert.equal(res19d.handled, false);
     assert.ok(res19d.error_notice?.includes("503"));
     passed("19d. AI Tool Agent signals graceful fallback on API outage");
+  }
+
+  // 19e. Metadata-only edit (set_school_name / rename_teacher) sets should_solve = false (no unnecessary rebuild)
+  {
+    let step = 0;
+    const res19e = await runGeminiToolCallingAgent({
+      message: "غير اسم المدرسة إلى مدرسة التجديد الذكية",
+      school,
+      markdown: "",
+      schedule,
+      history,
+      generateTurn: async () => {
+        step++;
+        if (step === 1) {
+          return {
+            text: "",
+            functionCalls: [
+              {
+                id: "fc_ren",
+                name: "apply_school_modifications",
+                args: { ops: [{ op: "set_school_name", name: "مدرسة التجديد الذكية" }] },
+              },
+            ],
+          };
+        }
+        return { text: "تم تعديل اسم المدرسة دون المساس بالجدول الحالي." };
+      },
+    });
+    assert.equal(res19e.handled, true);
+    assert.equal(res19e.should_solve, false, "School rename must NOT trigger schedule rebuild");
+    assert.equal(res19e.updated_school.name, "مدرسة التجديد الذكية");
+    passed("19e. Metadata-only op (set_school_name) keeps should_solve=false (no rebuild)");
+  }
+
+  // 19f. dryRunMinimalChange preserves >= 90% of existing schedule when adding AVOID_FIRST to one teacher
+  {
+    const p1Entry = schedule.entries.find((e) => e.period === 1 && e.day === 0);
+    if (p1Entry) {
+      const targetTch = school.teachers.find((t) => t.id === p1Entry.teacher_id)!;
+      const modSchool: SchoolData = JSON.parse(JSON.stringify(school));
+      const mTch = modSchool.teachers.find((t) => t.id === targetTch.id)!;
+      mTch.work_pattern = mTch.work_pattern || { day_rules: {}, daily_period_rules: [], placement_rules: [] };
+      mTch.work_pattern.placement_rules = [
+        ...(mTch.work_pattern.placement_rules || []),
+        { day: 0, placement_type: "AVOID_FIRST", is_hard: true, weight: 100 },
+      ];
+      const diffRes = dryRunMinimalChange(school, schedule, modSchool);
+      assert.equal(diffRes.has_changes, true, "Conflicting period 1 entry must be moved cleanly");
+      assert.ok(
+        diffRes.unchanged_count >= Math.floor(schedule.entries.length * 0.9),
+        `Expected >=90% unchanged entries, got ${diffRes.unchanged_count}/${schedule.entries.length}`
+      );
+      const stillInP1 = diffRes.preview_schedule.entries.some(
+        (e) => e.teacher_id === targetTch.id && e.day === 0 && e.period === 1
+      );
+      assert.equal(stillInP1, false, "Teacher must no longer have Sunday period 1 after minimal diff");
+      passed("19f. dryRunMinimalChange unpins conflicting rule cell while preserving >=90% of schedule");
+    }
   }
 
   console.log("\nALL_HUMAN_E2E_AGENT_MEMORY_TESTS_PASSED");
