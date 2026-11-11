@@ -6,7 +6,7 @@ import {
   type Section,
   type TeachingAssignment,
 } from "../types.ts";
-import { normAr } from "../services/schoolCore.ts";
+import { describeRule, normAr } from "../services/schoolCore.ts";
 
 interface TeacherManagementHubProps {
   school: SchoolData;
@@ -253,6 +253,42 @@ export default function TeacherManagementHub({
     onUpdateSchool({ ...school, teachers: updatedTeachers }, "تمت إزالة شرط الإجازة.");
   }
 
+  function handleClearPlacementRule(teacherId: string, ruleIdx: number) {
+    const updatedTeachers = school.teachers.map((t) => {
+      if (t.id !== teacherId) return t;
+      const prs = [...(t.work_pattern?.placement_rules || [])];
+      prs.splice(ruleIdx, 1);
+      return {
+        ...t,
+        work_pattern: {
+          day_rules: t.work_pattern?.day_rules || {},
+          daily_period_rules: t.work_pattern?.daily_period_rules || [],
+          ...t.work_pattern,
+          placement_rules: prs,
+        },
+      };
+    });
+    onUpdateSchool({ ...school, teachers: updatedTeachers }, "تمت إزالة قيد الحصة بنجاح.");
+  }
+
+  function handleClearDailyPeriodRule(teacherId: string, ruleIdx: number) {
+    const updatedTeachers = school.teachers.map((t) => {
+      if (t.id !== teacherId) return t;
+      const dprs = [...(t.work_pattern?.daily_period_rules || [])];
+      dprs.splice(ruleIdx, 1);
+      return {
+        ...t,
+        work_pattern: {
+          day_rules: t.work_pattern?.day_rules || {},
+          placement_rules: t.work_pattern?.placement_rules || [],
+          ...t.work_pattern,
+          daily_period_rules: dprs,
+        },
+      };
+    });
+    onUpdateSchool({ ...school, teachers: updatedTeachers }, "تمت إزالة الحد اليومي بنجاح.");
+  }
+
   function handleDeleteTeacher(teacherId: string) {
     const tch = school.teachers.find((t) => t.id === teacherId);
     if (!tch) return;
@@ -275,6 +311,8 @@ export default function TeacherManagementHub({
         .filter(([, rule]) => rule === "MANDATORY_OFF")
         .map(([dStr]) => dStr)
     : [];
+  const activePlacementRules = selectedTeacher?.work_pattern?.placement_rules || [];
+  const activeDailyRules = selectedTeacher?.work_pattern?.daily_period_rules || [];
 
   return (
     <div className="space-y-4">
@@ -440,6 +478,9 @@ export default function TeacherManagementHub({
               const offDaysCount = Object.values(t.work_pattern?.day_rules || {}).filter(
                 (r) => r === "MANDATORY_OFF"
               ).length;
+              const placementRulesCount = (t.work_pattern?.placement_rules || []).length;
+              const dailyRulesCount = (t.work_pattern?.daily_period_rules || []).length;
+              const totalConditionsCount = offDaysCount + placementRulesCount + dailyRulesCount;
 
               return (
                 <div
@@ -454,9 +495,9 @@ export default function TeacherManagementHub({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="font-bold text-[#1C1917] truncate">{t.name}</span>
-                      {offDaysCount > 0 && (
+                      {totalConditionsCount > 0 && (
                         <span className="text-[10px] bg-[#EDE9FE] text-[#6D28D9] px-1.5 py-0.2 rounded-full font-bold whitespace-nowrap">
-                          {offDaysCount} شرط
+                          {totalConditionsCount} شرط
                         </span>
                       )}
                     </div>
@@ -559,7 +600,7 @@ export default function TeacherManagementHub({
 
                 {/* Active Constraints from AI Chat + Tip */}
                 <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
-                  {activeOffDays.length > 0 ? (
+                  {activeOffDays.length > 0 || activePlacementRules.length > 0 || activeDailyRules.length > 0 ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-xs font-bold text-[#6D28D9]">الشروط المطبقة من الوكيل:</span>
                       {activeOffDays.map((dStr) => (
@@ -573,6 +614,40 @@ export default function TeacherManagementHub({
                             onClick={() => handleClearDayOffRule(selectedTeacher.id, dStr)}
                             className="hover:text-[#BE123C] font-black cursor-pointer"
                             aria-label={`إلغاء إجازة ${DAY_NAMES_AR[Number(dStr)]}`}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                      {activePlacementRules.map((pr, idx) => (
+                        <span
+                          key={`pr_${idx}`}
+                          className="inline-flex items-center gap-1.5 bg-[#CCFBF1]/70 text-[#0F766E] border border-[#14B8A6]/40 text-xs font-bold px-2.5 py-1 rounded-lg"
+                        >
+                          <span>{describeRule(pr)}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleClearPlacementRule(selectedTeacher.id, idx)}
+                            className="hover:text-[#BE123C] font-black cursor-pointer"
+                            aria-label={`إلغاء قيد ${describeRule(pr)}`}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                      {activeDailyRules.map((dr, idx) => (
+                        <span
+                          key={`dr_${idx}`}
+                          className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 text-xs font-bold px-2.5 py-1 rounded-lg"
+                        >
+                          <span>
+                            {DAY_NAMES_AR[dr.day]}: {dr.rule_type === "MAX" ? "أقصى" : dr.rule_type === "MIN" ? "أدنى" : "بالضبط"} {dr.count} حصص
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleClearDailyPeriodRule(selectedTeacher.id, idx)}
+                            className="hover:text-[#BE123C] font-black cursor-pointer"
+                            aria-label={`إلغاء الحد اليومي ${DAY_NAMES_AR[dr.day]}`}
                           >
                             ✕
                           </button>

@@ -21,7 +21,8 @@ import {
   getTeacherDayPeriods,
   type SchoolPreset,
 } from "./presets/commonPresets.ts";
-import { generateSchoolMarkdown } from "./services/schoolCore.ts";
+import { describeRule, generateSchoolMarkdown } from "./services/schoolCore.ts";
+import { validateSchedule } from "./services/solver.ts";
 import SchoolWizardStepper from "./components/SchoolWizardStepper.tsx";
 import {
   dryRunMinimalChange,
@@ -1142,7 +1143,9 @@ export default function App() {
         } else {
           const diffReport = dryRunMinimalChange(activeSchool, schedule, targetSchool);
           const repairedSchedule = diffReport.preview_schedule;
+          const postVal = validateSchedule(targetSchool, repairedSchedule.entries);
           setSchedule(repairedSchedule);
+          setValidation(postVal);
           setPendingDiff(null);
           setLastUpdatedTime(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }));
           persistSchoolData(targetSchool, res.updated_markdown || rawText, repairedSchedule, res.analysis || analysis);
@@ -3752,9 +3755,49 @@ export default function App() {
                           const teacherEntries = activeSchedule.entries.filter((e) => e.teacher_id === tch.id);
                           const quota = tch.max_weekly_periods || teacherEntries.length;
                           const completionPct = quota > 0 ? Math.round((teacherEntries.length / quota) * 100) : 100;
+                          const tchOffDays = Object.entries(tch.work_pattern?.day_rules || {})
+                            .filter(([, rule]) => rule === "MANDATORY_OFF")
+                            .map(([dStr]) => DAY_NAMES_AR[Number(dStr)] || dStr);
+                          const tchPlacementRules = tch.work_pattern?.placement_rules || [];
+                          const tchDailyRules = tch.work_pattern?.daily_period_rules || [];
+
+                          const isSlotBlockedByRule = (dayNum: number, periodNum: number, dayMaxP: number): boolean => {
+                            for (const r of tchPlacementRules) {
+                              if (r.is_hard === false) continue;
+                              if (r.day !== null && r.day !== undefined && Number(r.day) !== dayNum) continue;
+                              const n = r.n_periods ?? 1;
+                              if (r.placement_type === "AVOID_FIRST" && periodNum === 1) return true;
+                              if (r.placement_type === "AVOID_LAST" && periodNum === dayMaxP) return true;
+                              if (r.placement_type === "AVOID_PERIODS" && (r.exact_periods || []).includes(periodNum)) return true;
+                              if (r.placement_type === "FIRST_N" && periodNum > n) return true;
+                              if (r.placement_type === "LAST_N" && periodNum <= Math.max(0, dayMaxP - n)) return true;
+                              if (r.placement_type === "EXACT_PERIODS" && (r.exact_periods || []).length > 0 && !(r.exact_periods || []).includes(periodNum)) return true;
+                            }
+                            return false;
+                          };
 
                           return (
                             <div className="space-y-4">
+                              {(tchOffDays.length > 0 || tchPlacementRules.length > 0 || tchDailyRules.length > 0) && (
+                                <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 rounded-xl bg-[#EDE9FE]/55 border border-[#8B5CF6]/30 text-xs">
+                                  <span className="font-extrabold text-[#6D28D9]">القيود المطبقة على المعلم:</span>
+                                  {tchOffDays.length > 0 && (
+                                    <span className="bg-rose-100 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-lg font-bold">
+                                      إجازة: {tchOffDays.join("، ")}
+                                    </span>
+                                  )}
+                                  {tchPlacementRules.map((r, rIdx) => (
+                                    <span key={`tr_${rIdx}`} className="bg-white text-[#6D28D9] border border-[#8B5CF6]/35 px-2 py-0.5 rounded-lg font-bold">
+                                      {describeRule(r)}
+                                    </span>
+                                  ))}
+                                  {tchDailyRules.map((dr, drIdx) => (
+                                    <span key={`tdr_${drIdx}`} className="bg-white text-slate-700 border border-slate-300 px-2 py-0.5 rounded-lg font-bold">
+                                      {DAY_NAMES_AR[dr.day]}: {dr.rule_type === "MAX" ? "حد أقصى" : dr.rule_type === "MIN" ? "حد أدنى" : "بالضبط"} {dr.count} حصص
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               <div className="overflow-x-auto border border-slate-300 rounded-2xl shadow-xs timetable-scroll w-full">
                                 <table className="w-full text-xs border-collapse bg-white" style={{ zoom: `${timetableZoom}%` }}>
                                   <thead>
@@ -3796,6 +3839,13 @@ export default function App() {
                                               const entry = activeSchedule.entries.find(
                                                 (e) => e.teacher_id === tch.id && e.day === d && e.period === p
                                               );
+                                              if (!entry && isSlotBlockedByRule(d, p, count)) {
+                                                return (
+                                                  <td key={p} className="p-1.5 border-l border-slate-200 text-center bg-amber-50/70 text-amber-800 font-bold text-[10px]" title="حصة مستبعدة بناءً على قيد المعلم">
+                                                    ممنوع (قيد)
+                                                  </td>
+                                                );
+                                              }
 
                                               let isDoubleStart = false;
                                               let pairedEntry: TimetableEntry | undefined = undefined;
